@@ -4,14 +4,14 @@ import sys
 import json
 import subprocess
 import importlib
+import logging 
 
 #Import third-party python packages 
 import pandas as pd
 
-
-
 # Import local customised packages 
 from cafe_sales_pipeline_sequence import config_cafe_sales as config
+
 
 #The first step is to download the data from Kaggle. this should happen once. 
 def download_kaggle_dataset(retries=config.MAX_RETRIES):
@@ -78,16 +78,22 @@ def download_kaggle_dataset(retries=config.MAX_RETRIES):
         else:
             print("Kaggle was installed earlier. Kaggle is imported successfully")
         
-    # At this point, we can say that Kaggle should have been imported so we should start preparing to download the data
+    # At this point, we can say that Kaggle should have been imported. Hence, we should start preparing to download the data
         
-    # 1.4 We set credentails as environment variables (no file written to disk)
+    # 1.4 We set credentials as environment variables (no file written to disk)
     os.environ["KAGGLE_USERNAME"] = config.KAGGLE_USERNAME
     os.environ["KAGGLE_API_TOKEN"] = config.KAGGLE_API_TOKEN
 
     # 1.5 We download with retries
     os.makedirs(config.SALES_DATA_DOWNLOAD_PATH, exist_ok = True)
     for attempt in range(1, retries + 1):
-        try: 
+        if os.path.exists(cafe_sales_file_path):
+            print(f"Download complete. Files saved to: {config.SALES_DATA_DOWNLOAD_PATH}")
+            return True
+        # The above block of codes should not run on the first attempt because the file does not exists. 
+        # On the second or third attempt the above block completes the loop because the file path should exists in that instance. 
+
+        try:
             print(f"Attempt {attempt} / {retries} - Downloading '{config.CAFE_DATASET_KAGGLE}'")
             import kaggle
             kaggle.api.authenticate()
@@ -96,17 +102,21 @@ def download_kaggle_dataset(retries=config.MAX_RETRIES):
             path = config.SALES_DATA_DOWNLOAD_PATH,
             unzip = True
             ) 
-            print(f"Attempt {attempt} failed. Retrying...") # Codes reruns because of the loop
+            
         except Exception as e:
-            print(f"Download failed : {type(e).__name__}: {e}")
-            raise
-        else:
-            print(f"Download complete. Files saved to: {config.SALES_DATA_DOWNLOAD_PATH}")
+            print(f"Attempt {attempt} failed : {type(e).__name__}: {e}")
+            
+        # This code whose purpose is to inform us of the commencement of another attempt only runs if download fails.
+        if not os.path.exists(cafe_sales_file_path):
+                print(f"Attempt {attempt} failed. Retrying...") # Codes reruns because of the loop
 
 
+    # This code whose purpose is to inform us that all attempt failed only runs if the path does not exist yet after the loop is complete.
+    if not os.path.exists(cafe_sales_file_path):
+        print("All retries failed. Path does not exist.")
+        return False # Stops here. Signals failure
 
-    print("All retries failed.")
-    return False # Stops here. Signals failure
+    return True
     
 
 def extract():
@@ -126,16 +136,25 @@ def extract():
     
     
 
-# Run extraction pipeline
-if __name__ == "__main__":
-    print("Starting Download step and Extraction step...")
+# Orchestrator Function (This controls the order of functions, helping us ensure that each function runs sequentially) 
+def run_extract_sequence():
+    print("Starting Download Step and Extraction Step...")
 
     if download_kaggle_dataset(): # This runs first
-        cafe_sales = extract()     # This only returns if the first function, in this case download function, succeeded
+        cafe_sales = extract()     # This only returns if the first function, in this case download function, succeeded.
+
         if cafe_sales is not None:
             print(f"\nExtract sequence complete. Dataset is ready for Transform sequence.")
+            return cafe_sales # This cafe_sales data would be needed in other sequences in the pipeline. 
         else:
             print("\nExtraction failed.")
+            return None 
     else: 
         print("\nDownload failed. Skipping extraction.")
+        return None 
+
+# Script guard (This controls when the code runs, helping us ensure the code runs if we call it directly.) 
+
+if __name__ == "__main__":
+    run_extract_sequence()
 
