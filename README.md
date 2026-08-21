@@ -12,7 +12,7 @@ A data migration and cleaning ETL infrastructure that extracts datasets from Kag
 - [Data Warehouse Entity Relationship Model Diagram](#Data_Warehouse_Diagram)
 - [Data Model Notes](#Data_Model_Notes)
 - [Supporting Folders](#Supporting_Folders)
-- [Envirnoment Configuration](#Environment-Configuration)
+- [Environment Configuration](#Environment-Configuration)
 - [Use Cases](#Use-Cases)
 - [Version History](#Version-history)
 
@@ -149,8 +149,10 @@ POSTGRES_PASSWORD=
 ---
 
 
-## Version-history 1.1.0 (August 2026)
-
+## Version-history
+```
+1.1.0 - August 2026
+```
 
 ---
 
