@@ -8,7 +8,7 @@ A data migration and cleaning ETL infrastructure that extracts datasets from Kag
 - [Data Pipeline Flow](#Data-Pipeline-Flow)
 - [Project Structure](#Project-Structure)
 - [Pipelines](#`Pipelines/`)
-- [Data Warehouse](#`Data_Warehouse/`)
+- [Data Warehouse](#Data_Warehouse/)
 - [Data Warehouse Entity Relationship Model Diagram](#Data_Warehouse_Diagram)
 - [Data Model Notes](#Data_Model_Notes)
 - [Supporting Folders](#Supporting_Folders)
