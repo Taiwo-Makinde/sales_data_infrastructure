@@ -7,7 +7,7 @@ A data migration and cleaning ETL infrastructure that extracts datasets from Kag
 - [Overview](#Overview)
 - [Data Pipeline Flow](#Data-Pipeline-Flow)
 - [Project Structure](#Project-Structure)
-- [Pipelines](#Pipelines/)
+- [Pipelines](#`Pipelines/`)
 - [Data Warehouse](#`Data_Warehouse/`)
 - [Data Warehouse Entity Relationship Model Diagram](#Data_Warehouse_Diagram)
 - [Data Model Notes](#Data_Model_Notes)
@@ -55,7 +55,8 @@ Each of the three pipelines follows the same four steps:
 
 ---
 
-## `Pipelines/` — Detailed Structure
+## `Pipelines/` 
+**(Detailed Structure)**
  
 Each of the three pipelines is isolated in its own subfolder, with internal subfolders mirroring the ETL stages so extract, transform, and load logics stay decoupled and independently testable.
  
@@ -84,7 +85,8 @@ pipeline/
  
 ---
  
-## `Data_Warehouse/` — Detailed Structure
+## `Data_Warehouse/` 
+**(Detailed Structure)**
  
 | Folder | Purpose | When to Use |
 | ------ | ------- | ----------- |
