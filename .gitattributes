@@ -1,6 +1,7 @@
 # Auto detect text files and perform LF normalization
 * text=auto
 
-# Force GitHub to recognize SQL files
-*.sql linguist-detectable=true
+# Force GitHub to recognize SQL files while not ignoring the Python stats
 *.sql linguist-language=SQL
+*.sql linguist-detectable=true
+*.sql linguist-generated=true
