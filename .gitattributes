@@ -2,5 +2,5 @@
 * text=auto
 
 # Force GitHub to recognize SQL files while not ignoring the Python stats
+*.sql linguist-detectable=true
 *.sql linguist-language=SQL
-*.sql linguist-generated=true
