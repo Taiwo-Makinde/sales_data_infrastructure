@@ -1,6 +1,10 @@
 # Auto detect text files and perform LF normalization
 * text=auto
 
-# Force GitHub to recognize SQL files while not ignoring the Python stats
-*.sql linguist-detectable=true
-*.sql linguist-language=SQL
+# Some .sql code are hand-written while others are auto-generated
+# Detect .sql for hand-written sql code in migrations folder 
+migrations/**/*.sql linguist-detectable=true
+migrations/**/*.sql linguist-language=SQL
+
+# Consider .sql codes auto-generated using pg_dump (schema/complete_schema.sql)
+schema/**/*.sql linguist-generated=true
