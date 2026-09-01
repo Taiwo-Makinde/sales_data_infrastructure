@@ -63,18 +63,21 @@ Each of the three pipelines is isolated in its own subfolder, with internal subf
 ```
 pipeline/
 ├── cafe_sales_pipeline/
+│   ├── main_cafe_sales 
 │   └── cafe_sales_pipeline_sequence/                  
 │       ├── config_cafe_sales/       # Sets up configuration for pipeline and database 
 │       ├── extract_cafe_sales/      # Kaggle API auth + dataset extraction, Persist raw CSV to datasets/ & reads CSV → DataFrame
 │       ├── transform_cafe_sales     # Cleaning & transformation logic   
 │       └── load_cafe_sales/         # DataFrame → PostgreSQL
 ├── restaurant_sales_pipeline/
+│   ├── main_restaurant_sales 
 │   └── restaurant_sales_pipeline_sequence/
 │       ├── config_restaurant_sales/
 │       ├── extract_restaurant_sales/
 │       ├── transform_restaurant_sales/
 │       └── load_restaurant_sales/
 └── retail_stores_sales_pipeline/
+    ├── main_retail_sales
     └── retail_stores_pipeline_sequence/
         ├── config_retail_sales/
         ├── extract_retail_sales/
