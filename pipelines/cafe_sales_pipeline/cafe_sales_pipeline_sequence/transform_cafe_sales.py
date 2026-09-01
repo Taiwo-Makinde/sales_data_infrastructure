@@ -1,7 +1,7 @@
 # Transformation
 
 # Import the packages in the standard python module
-import logging # for logging
+import logging                               # for logging
 import random 
 random.seed(5)                               # 5 is a lucky number; I am specifying 5 so that the random shuffle is reproducible 
 
@@ -506,8 +506,9 @@ class CleanCafeSales:
 
         return cafe_sales
 
-
-    def probability_approach(dataframe = None, column = None):
+    
+    # We are not using None because we want the dataframe and column to be required 
+    def probability_approach(dataframe, column):
         """"
         General function to fill columns of dataframes randomly.
         This function would be called in 
@@ -526,7 +527,7 @@ class CleanCafeSales:
         empty_column = dataframe [column].isna()
         impacted_rows = empty_column.sum() 
 
-        dataframe.loc [empty_column, 'Payment Method'] = column_method_to_add [:empty_column_count]
+        dataframe.loc [empty_column, column] = column_method_to_add [:empty_column_count]
 
         if dataframe[column].notna().all():
             logger.info(f"Successfully filled {column} column in {impacted_rows} cells with probability approach")
@@ -540,7 +541,7 @@ class CleanCafeSales:
         """
         # Fill Payment Method
         try:
-            probability_approach(dataframe=cafe_sales, column = 'Payment Method')
+            probability_approach(dataframe = cafe_sales, column = 'Payment Method')
         except Exception as e:
             logger.exception(f"Attempt to fill Payment Method column with probability approach failed: {e}")
             return False
@@ -572,4 +573,41 @@ class CleanCafeSales:
             return False
 
         return cafe_sales
+
+
+# Feature engineering 
+
+def feature_engineer_date (cafe_sales):
+    """
+    Function to create new (column) features from Transaction Date: 
+    create a day of the week, Is weekend, Month Number, Month of the Year, Quarter of the Year and Year columns based on Transaction Date 
+    """
+
+    # 1.0 Date of the week
+
+    cafe_sales['Day of Week'] = cafe_sales['Transaction Date'].dt.day_name()
+
+    # 2.0 Boolean column is_weekend
+    # We create a column that contains the boolean solution to whether the day of the week is Saturday (5) or Sunday (6)
+        
+    cafe_sales['Is weekend'] = cafe_sales ['Transaction Date'].dt.weekday >= 5 # Thus, equal to or greater than 5
+
+    # 3.0 Month number 
+        
+    cafe_sales ['Month Number'] = cafe_sales ['Transaction Date'].dt.month
+
+    # 4.0 Month of the year 
+    cafe_sales ['Month of the Year'] = cafe_sales ['Transaction Date'].dt.month_name()
+
+    # 5.0 quarter 
+    # Using datetime string formatter to extract the quater of the year and append 'Q' as a prefix 
+    cafe_sales ['Quarter of the Year'] = cafe_sales ['Transaction Date'].dt.strftime('Q%q') # My intent is to format it as Q1, Q2, etc 
+
+    # 6.0 Year 
+    cafe_sales ['Year'] = cafe_sales ['Transaction Date'].dt.year
+
+    return cafe_sales
+
+     
+
 
