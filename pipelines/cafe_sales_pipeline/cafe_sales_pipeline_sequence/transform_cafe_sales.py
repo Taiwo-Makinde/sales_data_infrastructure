@@ -18,9 +18,13 @@ from sales_data_logs.sales_data_logging_config import setup_logging  # My person
 logger = logging.getLogger(__name__) # We use __name__ so that it correctly resolves to the module name and file name cafe_sales_pipeline_sequence + transform_cafe_sales
 
 class CleanCafeSales:
+    # The class is for orgnisation purposes. So we use decorator @staticmethod
     # We noticed that some cells are represented as unknown and error
     # We want to replace UNKNOWN and ERROR with nan.
-    def covert_error_unknown_to_null(cafe_sales):
+
+
+    @staticmethod # I want to inform python that the method following the decorator does not need access to the instance self or the class cls. 
+    def convert_error_unknown_to_null(cafe_sales):
         """This function takes in the cafe_sales dataframe, converts all column data type to string while mantinaing null values, 
         converts all 'ERROR' and 'UNKNOWN' to null values (nan) for further data cleaning.
         """
@@ -30,7 +34,7 @@ class CleanCafeSales:
             cafe_sales = cafe_sales.astype("string") 
         except Exception as e:
             logger.exception(f"Attempt to convert all columns to string data type failed : {e}")
-            return False 
+            raise 
         else:
             logger.info("Successfully converted all columns to string data type")
 
@@ -44,13 +48,14 @@ class CleanCafeSales:
 
         except Exception as e :
             logger.exception(f"Attempt to replace 'UNKNOWN' and 'ERROR' with null values failed : {e}")
-            return False
+            raise
         else:
             logger.info(f"Successfully replaced 'UNKNOWN' text in {mask_unknown.to_numpy().sum()} cells and 'ERROR' texts in {mask_error.to_numpy.sum()} cells with null values.")
             
         return cafe_sales
 
 
+    @staticmethod
     def convert_quantity_price_total_date(cafe_sales):
         """This function takes in the cafe_sales dataframe as a parameter,
         converts the data type for Quantity to number,
@@ -64,7 +69,7 @@ class CleanCafeSales:
              
         except Exception as e:
             logger.exception(f"Some error occurred during the conversion of Quantity column to Integer: {e}")
-            return False
+            raise
         else:
             logger.info("Quantity column's datatype successfully converted to Integer")
 
@@ -77,7 +82,7 @@ class CleanCafeSales:
             # We use pd.to_numeric + errors = 'coerce' because our data has null values
         except Exception as e: 
             logger.exception(f"Some error occured during conversion of Price Per Unit to Integer: {e}")
-            return False
+            raise
         else:
             logger.info("Price Per Unit column's datatype successfully converted to Integer")
 
@@ -87,7 +92,7 @@ class CleanCafeSales:
             cafe_sales['Total Spent'] = pd.to_numeric(cafe_sales['Total Spent'], errors= 'coerce')
         except Exception as e:
             logger.exception(f"Some error occured during the conversion of Total Spent column to Integer: {e}")
-            return False
+            raise
         else:
             logger.info("Total Spent column's datatype successfully converted to Integer")
 
@@ -97,13 +102,14 @@ class CleanCafeSales:
             cafe_sales['Transaction Date'] = pd.datetime(cafe_sales["Transaction Date"], errors = 'coerce')
         except Exception as e:
             logger.exception(f"Coversion of datatype fo Transaction date column failed: {e}")
-            return False
+            raise
         else:
             logger.info("Successfully coverted the datatype for 'Transaction Date' to datetime")
 
         return cafe_sales
    
-    
+
+    @staticmethod
     def fill_price_with_quantity_total (cafe_sales):
         """
         This function takes in the dataframe cafe_sales as a parameter,
@@ -120,13 +126,14 @@ class CleanCafeSales:
                 mask_empty_price, 'Quantity']
         except Exception as e:
             logger.exception(f"Error occured while filling Price Per Unit column with the division of values in Total Spent and Quantity:{e}")
-            return False
+            raise
         else:
             logger.info(f"Successfully filled {cells_affected} cells in the Price Per Unit column with division of Total Spent and Quantity columns.")
 
         return cafe_sales
 
 
+    @staticmethod
     def fill_price_based_on_item (cafe_sales):
         """
         This function takes in the dataframe cafe_sales as a parameter, 
@@ -153,13 +160,14 @@ class CleanCafeSales:
             cafe_sales.loc [mask_empty_price, 'Price Per Unit'] = cafe_sales.loc [mask_empty_price, 'Item'].map(item_price_dict)
         except Exception as e:
             logger.exception(f"Attempt to fill Price Per Unit Column with Item failed: {e}.")
-            return False
+            raise
         else:
             logger.info(f"Successfully filled Price Per Unit column with Item in {rows_affected} rows with {cells_affected} cells affected.") 
 
         return item_price_dict, cafe_sales 
 
 
+    @staticmethod
     def fill_empty_quantity_total (cafe_sales):
         """
         This function takes in the dataframe cafe_sales as a parameter, 
@@ -184,7 +192,7 @@ class CleanCafeSales:
                 mask_empty_quantity, 'Price Per Unit']
         except Exception as e:
             logger.exception(f"Error occured while filling Quantity column with the division of values in Total Spent and Price : {e}.")
-            return False
+            raise
         else:
             logger.info(f"Successfully filled Quantity column with division of Total Spent and Price columns, {quantity_affected} rows affected.")
 
@@ -194,13 +202,14 @@ class CleanCafeSales:
                 mask_empty_total, 'Price Per Unit']
         except Exception as e:
             logger.exception(f"Error occured while filling Price Per Unit column with the division of values in Total Spent and Quantity:{e}")
-            return False
+            raise
         else:
             logger.info(f"Successfully filled Total Spent column with the multiplication of Quantity and Price columns, {total_filled} rows affected.")
     
         return cafe_sales
 
 
+    @staticmethod
     def fill_empty_item (cafe_sales):
         """
         This function takes in the dataframe cafe_sales as a parameter, 
@@ -226,13 +235,14 @@ class CleanCafeSales:
             cafe_sales.loc [mask_empty_item, 'Item'] = (cafe_sales.loc [mask_empty_item, 'Price Per Unit'].map(price_item_dict))
         except Exception as e:
             logger.exception(f"Attempt to fill Item column with Price Per Unit failed: {e}.")
-            return False
+            raise
         else:
             logger.info(f"Successfully filled {rows_affected} rows in the Item column by apping it with the equivalent value in the Price Per Unit column.") 
 
         return price_item_dict, cafe_sales
 
 
+    @staticmethod
     # Probabilistic Approach
     def fill_item_price_probabilistic_approach (cafe_sales):
         """
@@ -294,7 +304,7 @@ class CleanCafeSales:
 
             except Exception as e:
                 logger.exception(f"Attempt to fill Quantity column based on probability where Item and Price Per Unit columns were not empty failed: {e}.")
-                return False
+                raise
             else:
                 logger.info(f"Successfully filled {sum_empty_quantity_total} cells in Quantity column using probability where Item and Price Per Unit columns were not empty.") 
 
@@ -317,7 +327,7 @@ class CleanCafeSales:
 
             except Exception as e:
                 logger.exception(f"Attempt to fill Total Spent column after using probability approach to fill Quantity column failed: {e}")
-                return False
+                raise
             else:
                 logger.info(f"Successfully filled {sum_empty_total} cells in Total Spent column after using probability approach to fill Quantity column.")
 
@@ -347,7 +357,7 @@ class CleanCafeSales:
             cafe_sales.loc [mask_item_price_qt_empty, 'Item'] = random_items
         except Exception as e : 
             logger.exception(f"Attempt to randomly fill Item column with the probability approach failed: {e}")
-            return False
+            raise
         else:
             logger.info(f"Successfully filled Item column with the probability approach in {affected_rows} rows")
 
@@ -363,7 +373,7 @@ class CleanCafeSales:
             cafe_sales.loc [mask_item_price_qt_empty, 'Price Per Unit'] = list(map(item_price_dict.get, random_items))
         except Exception as e:
             logger.exception(f"Attempt to randomly fill Item column with the probability approach failed: {e}")
-            return False
+            raise
         else:
             logger.info(f"Successfully filled Price Per Unit column with the probability approach in {affected_rows} rows")
 
@@ -381,7 +391,7 @@ class CleanCafeSales:
                  mask_item_price_qt_empty, 'Price Per Unit']
         except Exception as e:
             logger.exception(f"Error occured while filling Quantity column with the division of values in Total Spent and Price : {e}.")
-            return False
+            raise
         else:
             logger.info(f"Successfully filled Quantity column with division of Total Spent and Price columns, {affected_rows} rows affected.")
 
@@ -391,7 +401,7 @@ class CleanCafeSales:
                  mask_item_price_qt_empty, 'Price Per Unit']
         except Exception as e:
             logger.exception(f"Error occured while filling Price Per Unit column with the division of values in Total Spent and Quantity:{e}")
-            return False
+            raise
         else:
             logger.info(f"Successfully filled {affected_rows} rows Total Spent column with Quantity and Price columns, a   affected.")
             
@@ -399,6 +409,7 @@ class CleanCafeSales:
         return cafe_sales
 
     
+    @staticmethod
     def fill_empty_quantity_total_probabilistic_approach (cafe_sales):
 
         # Second level of Probabilistic Approach
@@ -425,7 +436,7 @@ class CleanCafeSales:
             cafe_sales.loc [empty_item_price_quantity_total, 'Item'] = random_items
         except Exception as e : 
             logger.exception(f"Attempt to randomly fill Item column with the probability approach (second-level) failed: {e}")
-            return False
+            raise
         else:
             logger.info(f"Successfully filled Item column with the probability approach (second level) in {affected_empty_rows} rows")
 
@@ -442,7 +453,7 @@ class CleanCafeSales:
             cafe_sales.loc [empty_item_price_quantity_total, 'Price Per Unit'] = list(map(item_price_dict.get, random_items))
         except Exception as e:
             logger.exception(f"Attempt to randomly fill Price Per Unit column with the probability approach (second level) failed: {e}")
-            return False
+            raise
         else:
             logger.info(f"Successfully filled Price Per Unit column with the probability approach (second level) in {affected_rows} rows")
 
@@ -477,7 +488,7 @@ class CleanCafeSales:
             cafe_sales.loc [empty_item_price_quantity_total, 'Quantity'] = empty_item_price_quantity_total_method_to_add [:empty_item_price_quantity_total_count]
         except Exception as e:
             logger.exception(f"Attempt to fill Quantity column based on probability where Item and Price Per Unit columns were not empty failed: {e}.")
-            return False
+            raise
         else:
             logger.info(f"Successfully filled {affected_empty_rows} cells in Quantity column using probability (second-level)") 
 
@@ -488,7 +499,7 @@ class CleanCafeSales:
                 empty_item_price_quantity_total, 'Price Per Unit']
         except Exception as e:
             logger.exception(f"Attempt to fill Total Spent after probability approach has been used on Price Per Unit failed: {e}")
-            return False
+            raise
         else:
             logger.info(f"Successfully filled Total Spent column in {affected_empty_rows} cells after Price Per Unit probability approach")
         
@@ -502,12 +513,13 @@ class CleanCafeSales:
 
             logger.info(f"There are still{sum_missing_item} missing cells in Item column, {sum_missing_price} cells in Price Per Unit column,'\n'
                         {sum_missing_quantity} cells in Quantity column and {sum_missing_total} cells in Total Spent column.")
-            return False
+            raise
 
         return cafe_sales
 
-    
+    @staticmethod
     # We are not using None because we want the dataframe and column to be required 
+    # This is just a helper function 
     def probability_approach(dataframe, column):
         """"
         General function to fill columns of dataframes randomly.
@@ -522,7 +534,7 @@ class CleanCafeSales:
         for method, prop in column_proportions.items():
             column_method_to_add.extend([method] * round(prop * empty_column_count))
         
-        random.shuffle
+        random.shuffle(column_method_to_add)
 
         empty_column = dataframe [column].isna()
         impacted_rows = empty_column.sum() 
@@ -535,42 +547,45 @@ class CleanCafeSales:
         return dataframe 
 
 
+    @staticmethod
     def fill_payment_prob_imputation(cafe_sales):
         """
         Function that calls the probability_approach function to fill Payment Method column. 
         """
         # Fill Payment Method
         try:
-            probability_approach(dataframe = cafe_sales, column = 'Payment Method')
+            cafe_sales = CleanCafeSales.probability_approach(dataframe = cafe_sales, column = 'Payment Method')
         except Exception as e:
             logger.exception(f"Attempt to fill Payment Method column with probability approach failed: {e}")
-            return False
+            raise
 
         return cafe_sales
 
 
+    @staticmethod
     def fill_location_prob_imputation (cafe_sales):
         """
         Function that calls the probability_approach function to fill location column. 
         """
         try:
-            probability_approach(dataframe = cafe_sales, column = 'Location')
+            cafe_sales = CleanCafeSales.probability_approach(dataframe = cafe_sales, column = 'Location')
         except Exception as e:
             logger.exception(f"Attempt to fill Location column with probability approach failed: {e}")
-            return False
+            raise
 
         return cafe_sales
 
 
+    @staticmethod
     def fill_date_probabilistic_imputation (cafe_sales):
         """
         Function that calls the probability_approach function to fill Transaction Date column.
         """
         try:
-            probability_approach(dataframe = cafe_sales, column = 'Transaction Date')
+            cafe_sales = CleanCafeSales.probability_approach(dataframe = cafe_sales, column = 'Transaction Date')
         except Exception as e :
             logger.exception(f"Attempt to fill Transaction Date column with probability approach failed: {e}")
-            return False
+            raise
 
         return cafe_sales
 
@@ -607,6 +622,38 @@ def feature_engineer_date (cafe_sales):
     cafe_sales ['Year'] = cafe_sales ['Transaction Date'].dt.year
 
     return cafe_sales
+
+
+
+
+def run_transformation (cafe_sales):
+    """
+    Function that orchestrates the transformation stage  
+    """
+
+    functions = [CleanCafeSales.convert_error_unknown_to_null,
+    CleanCafeSales.convert_quantity_price_total_date,
+    CleanCafeSales.fill_price_with_quantity_total,
+    CleanCafeSales.fill_price_based_on_item,
+    CleanCafeSales.fill_empty_quantity_total,
+    CleanCafeSales.fill_empty_item,
+    CleanCafeSales.fill_item_price_probabilistic_approach,
+    CleanCafeSales.fill_empty_quantity_total_probabilistic_approach,
+    CleanCafeSales.fill_payment_prob_imputation,                                            # helper function probability_approach() would be called when this function runs
+    CleanCafeSales.fill_location_prob_imputation,
+    CleanCafeSales.fill_date_probabilistic_imputation,
+    feature_engineer_date,
+    ]
+
+    for function in functions:
+        cafe_sales = function(cafe_sales)
+        return cafe_sales
+
+
+# This is the script guard that controls when the code runs. It ensures that the codes run if we call it directly.
+if __name__ == "__main__":
+    setup_logging()
+    run_transformation()
 
      
 
