@@ -653,7 +653,7 @@ def run_transformation (cafe_sales):
 # This is the script guard that controls when the code runs. It ensures that the codes run if we call it directly.
 if __name__ == "__main__":
     setup_logging()
-    run_transformation()
+    run_transformation(cafe_sales)
 
      
 
