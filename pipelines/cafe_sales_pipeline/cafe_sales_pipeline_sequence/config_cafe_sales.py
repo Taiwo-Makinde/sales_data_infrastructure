@@ -21,7 +21,7 @@ CAFE_DATASET_KAGGLE = os.getenv("CAFE_DATASET_KAGGLE") # Reference to the datase
 SALES_DATA_DOWNLOAD_PATH = os.getenv("SALES_DATA_DOWNLOAD_PATH")
 CAFE_SALES_DATASET = os.getenv("CAFE_SALES_DATASET") 
 # We included the empty string so that an error would not be thrown, because the first time config runs the dataset would not exist
-# We would verify that the daatset exists in a different function # See extract_sales_data
+# We would verify that the dataset exists in a different function # See extract_sales_data
 
 # For extraction step
 EXTRACT_PATH = SALES_DATA_DOWNLOAD_PATH
@@ -37,7 +37,7 @@ FILE_DOWNLOAD_FORMAT = "csv"
 
 DB_HOST = os.getenv("DB_HOST")
 DB_PORT = os.getenv("DB_PORT")
-DB_NAME = os.getenv("SALES_DATA_WAREHOUSE")
+DB_NAME = os.getenv("DB_NAME")
 DB_USER = os.getenv("DB_USER")
 DB_PASSWORD = os.getenv("DB_PASSWORD")
 

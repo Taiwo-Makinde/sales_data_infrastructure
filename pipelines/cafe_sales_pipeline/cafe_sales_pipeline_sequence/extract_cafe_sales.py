@@ -32,7 +32,7 @@ def download_kaggle_dataset(retries=config.MAX_RETRIES):
 
     # 1.2 Validate Kaggle credentials first before doing anything else 
     if not config.KAGGLE_USERNAME or not config.KAGGLE_API_TOKEN:
-        logger.error("Missing KAGGLE_USERNAME or KAGGLE_API_KEY in cafe.env")
+        logger.error("Missing KAGGLE_USERNAME or KAGGLE_API_KEY in environmental variable file.")
         return False # Stops here. Signals failure.
 
     # 1.3
@@ -52,12 +52,12 @@ def download_kaggle_dataset(retries=config.MAX_RETRIES):
             try:
                 subprocess.check_call([sys.executable, "-m", "pip", "install", "kaggle", "-q", "--no-deps"])
             except subprocess.CalledProcessError as f:
-                logger.exception("installation without dependencies failed.")
+                logger.exception(f"installation without dependencies failed: {f}")
                 return False
             else:
-                    logger.info("Kaggle successfully installed with no dependencies.")
+                logger.info("Kaggle successfully installed with no dependencies.")
             finally:
-                    logger.info("No-dep install attempt completed.")
+                logger.info("No-dep install attempt completed.")
         else: 
             logger.info("kaggle fully installed, with all dependencies.")
         finally:
@@ -153,10 +153,10 @@ def run_extract_sequence():
             return cafe_sales # This cafe_sales data would be needed in other sequences in the pipeline. 
         else:
             logger.error("\nExtraction failed.")
-            return None 
+            raise KeyError
     else: 
-        logger.error("\nDownload failed. Skipping extraction.")
-        return None 
+        logger.error("\nDownload failed...")
+        raise FileNotFoundError
 
 # Script guard (This controls when the code runs, helping us ensure the code runs if we call it directly.) 
 
