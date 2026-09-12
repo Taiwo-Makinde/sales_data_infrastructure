@@ -17,4 +17,13 @@ from cafe_sales_pipeline_sequence.load_cafe_sales import run_load_cafe_sales
 logger = logging.getLogger(__name__)
 
 
-# 
+#
+def run_cafe_sales_pipeline (config, cafe_sales):
+    run_extract_sequence()
+    run_transformation(cafe_sales)
+    run_load_cafe_sales()
+
+if __name__ == "__main__":
+    setup_logging()
+    run_cafe_sales_pipeline()
+
