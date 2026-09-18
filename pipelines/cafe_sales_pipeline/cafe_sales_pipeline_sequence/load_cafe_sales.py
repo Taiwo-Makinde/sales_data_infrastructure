@@ -9,7 +9,8 @@ from sqlalchemy import text                                          # for the S
 
 # Import customised local packages 
 from sales_data_logs.sales_data_logging_config import setup_logging  # My personalised logging module that outputs logs in single-line json format. 
-from config_cafe_sales import sales_dw_engine                        # My database (data warehouse) configuration (has the details: user, password, host, port & database name)
+from cafe_sales_pipeline_sequence.config_cafe_sales import sales_dw_engine                        # My database (data warehouse) configuration (has the details: user, password, host, port & database name)
+from cafe_sales_pipeline_sequence.trasnform_cafe_sales import run_transformation
 
 
 # We set up our logger 
@@ -144,78 +145,67 @@ def load_dimension_tables(cafe_sales):
 
 
 # Merge 
-def read_foreign_keys (sales_dw_engine):
+def read_foreign_keys (sales_dw_engine) -> dict[str, pd.Dataframe]:
     """
     
     """
+    db_dict = {}
     try:
-        global global_items_db                                             # We want to be able to reference item_db outside of this function
-        global items_db = pd.read_sql("SELECT item_key, item_name", sales_dw_engine)
+        db_dict ["items_db"] = pd.read_sql("SELECT item_key, item_name FROM dimensions.item", sales_dw_engine)                           # We want to be able to reference item_db outside of this function
     except Exception as e:
         logger.exception("")
         raise
 
     try:
-        global global_payment_db
-        payment_db = pd.read_sql("SELECT payment_method_key, payment_method_name", sales_dw_engine)
+        db_dict ["payment_db"] = pd.read_sql("SELECT payment_method_key, payment_method_name FROM dimensions.payment_method", sales_dw_engine)
     except Exception as e:
         logger.exception ("")
         raise
 
     try:
-        global global_location_db 
-        location_db = pd.read_sql("SELECT location_key, location_name", sales_dw_engine)
+        db_dict ["location_db"] = pd.read_sql("SELECT location_key, location_name FROM dimensions.location", sales_dw_engine)
     except Exception as e:
         logger.exception ("")
         raise
 
     try:
-        global global_date_db 
-        date_db = pd.read_sql("SELECT date_key, full_date", sales_dw_engine)
+        db_dict ["date_db"] = pd.read_sql("SELECT date_key, full_date FROM dimensions.date", sales_dw_engine)
     except Exception as e:
         logger.exception ("")
         raise
 
+    return db_dict
 
-def merge_foreign_keys_dataframe (cafe_sales):
+
+def merge_foreign_keys_dataframe (cafe_sales, db_dict):
     """
     
     """
-    # Merge with items_db
+    # Merge with items_db, payment_db, location_db, date_db
     try:
-        (
-            cafe_sales.merge (global_items_db, left_on= "Item", right_on = "item_name")
-            .merge (global_payment_db, left_on = "Payment Method", right_on = "payment_method_name")
-            .merge (global_location_db, left_on = "Location", right_on = "location_name")
-            .merge (global_date_db, left_on = "Transaction Date", right_on= "full_date")
+        fact_df = (
+            cafe_sales.merge (db_dict["items_db"], left_on= "Item", right_on = "item_name")
+            .merge (db_dict["payment_db"], left_on = "Payment Method", right_on = "payment_method_name")
+            .merge (db_dict["location_db"], left_on = "Location", right_on = "location_name")
+            .merge (db_dict["date_db"], left_on = "Transaction Date", right_on= "full_date")                                                               # Merge the dataframe (which contains data from the selected columns of the database tables) with the original cafe_sales dataframe
+        [["Transaction ID", "date_key", "item_key", "payment_method_key", "location_key", "Quantity", "Price Per Unit", "Total Spent"]]                    # select only a few columns we need for our fact table # Some information here is missing 
+        .rename(columns ={
+                    "Transaction ID": "transaction_id",
+                    "Quantity" : "quantity",
+                    "Price Per Unit": "price_per_unit",
+                    "Total Spent" : "total_spent"
+                    }
+                )
         )
     except Exception as e:
         logger.exception(f"")
         raise
+    
+    return fact_df
 
-    # Choose waht should form the fact table
+def load_fact_table (fact_df):
     try:
-        global global_fact_table
-        global_fact_table = (
-            [["Transaction ID", "date_key", "item_key", "payment_method_key", "location_key", "Quantity", "Price Per Unit", "Total Spent"]] # Some information here is missing 
-        .rename(
-            columns ={
-            "Transaction ID": "transaction_id",
-            "Quantity" : "quantity",
-            "Price Per Unit": "price_per_unit",
-            "Total Spent" : "total_spent"}
-        )
-        )
-
-    except Exception as e:
-        logger.exception(f"")
-        raise
-
-    return cafe_sales
-
-def load_fact_table ():
-    try:
-        insert_table (global_fact_table, table = "cafe_sales", schema ="dimensions", conflict_columns = "transaction_id")
+        insert_table (fact_df, table = "cafe_sales", schema ="dimensions", conflict_columns = "transaction_id")
     except Exception as e:
         logger.exception (f"")
         raise
@@ -223,10 +213,11 @@ def load_fact_table ():
 
 # Orchestration function 
 def run_load_cafe_sales ():
+    cafe_sales = run_transformation (cafe_sales)
     load_dimension_tables(cafe_sales)
-    read_foreign_keys(sales_dw_engine)
-    merge_foreign_keys_dataframe (cafe_sales)
-    load_fact_table()
+    db_dict = read_foreign_keys(sales_dw_engine)
+    fact_df  = merge_foreign_keys_dataframe (cafe_sales, db_dict) 
+    load_fact_table (fact_df)
 
 # 
 if __name__ == "__main__" :
