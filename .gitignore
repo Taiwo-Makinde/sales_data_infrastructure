@@ -1,2 +1,10 @@
+# my specific folders
 config/
 datasets/
+
+# other folders
+__pycache__/
+*.pyc
+*.egg-info/
+build/
+dist/

@@ -18,7 +18,7 @@ LOG_LEVEL = "DEBUG"
 # Using resolve(), we anchor the logs folder to a predictable file location not the current working directory so that logs always land in the same place, 
 # regardless of where the script is run from
 SALES_DATA_LOG_DIR = Path(__file__).resolve().parent / "logs"
-SALES_DATA_LOG_DIR.mkdir(exists_ok=True) #exists_ok=True is an error handling syntax that ensures that error is not thrown where the file exists
+SALES_DATA_LOG_DIR.mkdir(exist_ok=True) #exist_ok=True is an error handling syntax that ensures that error is not thrown where the file exists
 
 
 # This project has more than one pipeline delivering data to one data warehouse. We want to create a configuration for a general logging file that works for the three entities.  
@@ -111,11 +111,11 @@ def building_logging_config() -> dict:
     }
 
 
-SALES_DATA_LOG_CONFIG = building_logging_config
+SALES_DATA_LOG_CONFIG = building_logging_config()
 
 
 def setup_logging() -> None:
-    """"We would be calling this once, at the start of the program i.e sales_data_pipeline.py"""
+    """"We would be calling this once, at the start of the program i.e main_cafe_sales.py"""
     logging.config.dictConfig(SALES_DATA_LOG_CONFIG)
         
         

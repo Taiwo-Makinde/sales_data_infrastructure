@@ -4,12 +4,15 @@ import logging                                                      # For loggin
 
 # Import third party python packages 
 import pandas as pd                                                  # For dataframe 
-from sqlalchemy import text                                          # for the SQL database
+from sqlalchemy import text                                          # for the SQL 
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 
 # Import customised local packages 
 from sales_data_logs.sales_data_logging_config import setup_logging  # My personalised logging module that outputs logs in single-line json format. 
-from config_cafe_sales import sales_dw_engine                        # My database (data warehouse) configuration (has the details: user, password, host, port & database name)
+from cafe_sales_pipeline_sequence.config_cafe_sales import sales_dw_engine                        # My database (data warehouse) configuration (has the details: user, password, host, port & database name)
+from cafe_sales_pipeline_sequence.extract_cafe_sales import run_extract_sequence
+from cafe_sales_pipeline_sequence.transform_cafe_sales import run_transformation
 
 
 # We set up our logger 
@@ -29,6 +32,7 @@ class PrepareCafeSales:
         2. drops duplicates
         3. renames our column names to match the table column name
         """
+        dataframe = dataframe.copy()
         return (
             dataframe[list(column_maps.keys())]
             .drop_duplicates()
@@ -37,7 +41,7 @@ class PrepareCafeSales:
     
 
     @staticmethod
-    def prepare_items(cafe_sales):
+    def prepare_items(cafe_sales: pd.DataFrame) -> pd.DataFrame:
         try:
             item_df = PrepareCafeSales.prepare_columns(cafe_sales, column_maps = {"Item": "item_name"})
         except Exception as e:
@@ -48,7 +52,7 @@ class PrepareCafeSales:
 
 
     @staticmethod
-    def prepare_payment (cafe_sales):
+    def prepare_payment (cafe_sales: pd.DataFrame) -> pd.DataFrame:
         try:
             payment_df = PrepareCafeSales.prepare_columns(cafe_sales, column_maps = {"Payment Method" : "payment_method_name"})
         except Exception as e:
@@ -59,7 +63,7 @@ class PrepareCafeSales:
 
 
     @staticmethod
-    def prepare_location (cafe_sales):
+    def prepare_location (cafe_sales: pd.DataFrame) -> pd.DataFrame:
         try:
             location_df = PrepareCafeSales.prepare_columns(cafe_sales, column_maps = {"Location" : "location_name"})
         except Exception as e:
@@ -70,7 +74,7 @@ class PrepareCafeSales:
 
 
     @staticmethod
-    def prepare_date(cafe_sales):
+    def prepare_date(cafe_sales: pd.DataFrame):
         try: 
             date_df = PrepareCafeSales.prepare_columns (cafe_sales, column_maps = {
                         "Transaction Date" : "full_date",
@@ -93,7 +97,7 @@ class PrepareCafeSales:
 # Load
 # LoadCafeSales
 # Generic insert function
-def insert_table (dataframe, table, schema, conflict_columns ):                 
+def insert_table (dataframe, database_engine, table, schema, conflict_columns):                 
     # conflict_column is the column whose values should not conflict so we can properly generate primary (surrogate) keys so I check for duplicates 
     """
     A generic function that inserts dataframes into PostgreSQL table. 
@@ -104,6 +108,7 @@ def insert_table (dataframe, table, schema, conflict_columns ):
     """
     try: 
         # Step 1 - Convert the whole table to a lists of python dictionaries
+        dataframe = dataframe.copy()
         records = dataframe.to_dict(orient = "records")
 
         # Step 2 - Build the SQL schema once and for all. 
@@ -112,7 +117,7 @@ def insert_table (dataframe, table, schema, conflict_columns ):
         
         cols = ", ".join(dataframe.columns)
         vals = ", ".join([f":{c}" for c in dataframe.columns])
-        conflicts = ", ".join(conflict_columns)
+        conflicts = ", ".join(conflict_columns) if not isinstance(conflict_columns, str) else conflict_columns 
 
         sql = text(f"""
             INSERT INTO {schema}.{table} ({cols})
@@ -120,11 +125,11 @@ def insert_table (dataframe, table, schema, conflict_columns ):
             ON CONFLICT ({conflicts}) DO NOTHING
         """)
 
-        # Step 3 - 
-        with sales_dw_engine.connect() as conn:
+        # Step 3 - Load into the database/data warehouse
+        with database_engine.connect() as conn:
             conn.execute(sql, records)
             conn.commit()
-            logger.info(f"Loaded {len(dataframe)} rows into{schema}.{table} succesfully")
+            logger.info(f"Loaded {len(dataframe)} rows into {schema}.{table} succesfully")
 
     except Exception as e:
             logger.exception(f"Failed to load {schema}.{table}, the reason being {e} ")
@@ -133,103 +138,102 @@ def insert_table (dataframe, table, schema, conflict_columns ):
 
 # Fill dimension tables first since they contain the primary keys
 # We would just call load_dimension_tables function
-def load_dimension_tables(cafe_sales):
+def load_dimension_tables(cafe_sales: pd.DataFrame, sales_dw_engine):
     """
     One general function to load all dimension tables making use of a helper function insert_table() 
     """
-    insert_table(PrepareCafeSales.prepare_items(cafe_sales), table = "item", schema = "dimensions", conflict_columns = ["item_name"])
-    insert_table(PrepareCafeSales.prepare_payment(cafe_sales), table = "payment_method", schema = "dimensions", conflict_columns = ["payment_method_name"])
-    insert_table(PrepareCafeSales.prepare_location(cafe_sales), table = "location", schema = "dimensions", conflict_column = ["location_name"])
-    insert_table(PrepareCafeSales.prepare_date(cafe_sales), table = "date", schema = "dimensions", conflict_columns = ["full_date"])
-
-
-# Merge 
-def read_foreign_keys (sales_dw_engine):
-    """
-    
-    """
+    cafe_sales = cafe_sales.copy()
     try:
-        global global_items_db                                             # We want to be able to reference item_db outside of this function
-        global items_db = pd.read_sql("SELECT item_key, item_name", sales_dw_engine)
-    except Exception as e:
-        logger.exception("")
-        raise
-
-    try:
-        global global_payment_db
-        payment_db = pd.read_sql("SELECT payment_method_key, payment_method_name", sales_dw_engine)
-    except Exception as e:
-        logger.exception ("")
-        raise
-
-    try:
-        global global_location_db 
-        location_db = pd.read_sql("SELECT location_key, location_name", sales_dw_engine)
-    except Exception as e:
-        logger.exception ("")
-        raise
-
-    try:
-        global global_date_db 
-        date_db = pd.read_sql("SELECT date_key, full_date", sales_dw_engine)
-    except Exception as e:
-        logger.exception ("")
-        raise
-
-
-def merge_foreign_keys_dataframe (cafe_sales):
-    """
-    
-    """
-    # Merge with items_db
-    try:
-        (
-            cafe_sales.merge (global_items_db, left_on= "Item", right_on = "item_name")
-            .merge (global_payment_db, left_on = "Payment Method", right_on = "payment_method_name")
-            .merge (global_location_db, left_on = "Location", right_on = "location_name")
-            .merge (global_date_db, left_on = "Transaction Date", right_on= "full_date")
-        )
-    except Exception as e:
-        logger.exception(f"")
-        raise
-
-    # Choose waht should form the fact table
-    try:
-        global global_fact_table
-        global_fact_table = (
-            [["Transaction ID", "date_key", "item_key", "payment_method_key", "location_key", "Quantity", "Price Per Unit", "Total Spent"]] # Some information here is missing 
-        .rename(
-            columns ={
-            "Transaction ID": "transaction_id",
-            "Quantity" : "quantity",
-            "Price Per Unit": "price_per_unit",
-            "Total Spent" : "total_spent"}
-        )
-        )
+        insert_table(PrepareCafeSales.prepare_items(cafe_sales), sales_dw_engine, table = "item", schema = "dimensions", conflict_columns = ["item_name"])
+        insert_table(PrepareCafeSales.prepare_payment(cafe_sales), sales_dw_engine, table = "payment_method", schema = "dimensions", conflict_columns = ["payment_method_name"])
+        insert_table(PrepareCafeSales.prepare_location(cafe_sales), sales_dw_engine, table = "location", schema = "dimensions", conflict_columns = ["location_name"])
+        insert_table(PrepareCafeSales.prepare_date(cafe_sales), sales_dw_engine, table = "date", schema = "dimensions", conflict_columns = ["full_date"])
 
     except Exception as e:
-        logger.exception(f"")
+        logger.exception(f"Could not insert tables : {e}")
         raise
 
     return cafe_sales
 
-def load_fact_table ():
+
+# Merge 
+def read_merge_insert_fact_table (cafe_sales: pd.DataFrame, sales_dw_engine):
+    """
+    Function to 
+    1. read foreign keys from dimension tables 
+    2. Merge the foreign keys and unique keys with cafe_sales 
+    3. return fact table
+    """
+    # I would read primary keys and the unique column from dimension tables and join them to the dataframe (so that the primary keys become foreign keys) and load the selected columns into the fact tables
+    # 1.0  read primary keys from the dimension tables
+    cafe_sales = cafe_sales.copy()
     try:
-        insert_table (global_fact_table, table = "cafe_sales", schema ="dimensions", conflict_columns = "transaction_id")
+        items_db = pd.read_sql("SELECT item_key, item_name FROM dimensions.item", sales_dw_engine)                           # We want to be able to reference item_db outside of this function
     except Exception as e:
-        logger.exception (f"")
+        logger.exception(f"Could not read dimensions.item: {e}")
         raise
+
+    try:
+        payment_db = pd.read_sql("SELECT payment_method_key, payment_method_name FROM dimensions.payment_method", sales_dw_engine)
+    except Exception as e:
+        logger.exception (f"Could not read dimensions.payment_method: {e}")
+        raise
+
+    try:
+        location_db = pd.read_sql("SELECT location_key, location_name FROM dimensions.location", sales_dw_engine)
+    except Exception as e:
+        logger.exception (f"Could not read dimensions.location: {e}")
+        raise
+
+    try:
+        date_db = pd.read_sql("SELECT date_key, full_date FROM dimensions.date", sales_dw_engine)
+    except Exception as e:
+        logger.exception (f"Could not read dimensions.date: {e}")
+        raise
+
+    date_db["full_date"] = pd.to_datetime(date_db["full_date"])                                                 # different from of date in Python and SQL
+
+    # 2.0 Merge with items_db, payment_db, location_db, date_db with cafe_sales dataframe
+    try:
+        fact_df = (
+            cafe_sales.merge (items_db, left_on= "Item", right_on = "item_name")
+            .merge (payment_db, left_on = "Payment Method", right_on = "payment_method_name")
+            .merge (location_db, left_on = "Location", right_on = "location_name")
+            .merge (date_db, left_on = "Transaction Date", right_on= "full_date")                                                               # Merge the dataframe (which contains data from the selected columns of the database tables) with the original cafe_sales dataframe
+        [["Transaction ID", "date_key", "item_key", "payment_method_key", "location_key", "Quantity", "Price Per Unit", "Total Spent"]]                    # select only a few columns we need for our fact table # Some information here is missing 
+        .rename(columns ={
+                    "Transaction ID": "transaction_id",
+                    "Quantity" : "quantity",
+                    "Price Per Unit": "price_per_unit",
+                    "Total Spent" : "total_spent"
+                    }
+                )
+        )
+    except Exception as e:
+        logger.exception(f"Merging dimension keys into the fact table failed: {e}")
+        raise
+
+    # 3.0 Load the data into the data warehouse
+    try:
+        insert_table (fact_df, sales_dw_engine, table = "cafe_sales", schema ="facts", conflict_columns = ["transaction_id"])
+    except Exception as e:
+        logger.exception (f"Could not load the fact table: {e}")
+        raise
+
+    return cafe_sales
+
 
 
 # Orchestration function 
-def run_load_cafe_sales ():
-    load_dimension_tables(cafe_sales)
-    read_foreign_keys(sales_dw_engine)
-    merge_foreign_keys_dataframe (cafe_sales)
-    load_fact_table()
+def run_load_cafe_sales (cafe_sales, sales_dw_engine):
+    load_dimension_tables(cafe_sales, sales_dw_engine)
+    read_merge_insert_fact_table (cafe_sales, sales_dw_engine)
+    
+    return cafe_sales
 
 # 
 if __name__ == "__main__" :
     setup_logging()
-    run_load_cafe_sales()
+    cafe_sales = run_transformation (run_extract_sequence())
+    run_load_cafe_sales (cafe_sales, sales_dw_engine)
 

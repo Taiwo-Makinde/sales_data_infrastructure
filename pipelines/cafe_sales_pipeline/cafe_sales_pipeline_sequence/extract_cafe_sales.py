@@ -3,8 +3,8 @@ import os
 import sys 
 import json
 import subprocess
-import importlib
-import logging # Logging
+import importlib.util                                               # We need util under importlib 
+import logging                                                      # Logging
 
 #Import third-party python packages 
 import pandas as pd
@@ -32,14 +32,18 @@ def download_kaggle_dataset(retries=config.MAX_RETRIES):
 
     # 1.2 Validate Kaggle credentials first before doing anything else 
     if not config.KAGGLE_USERNAME or not config.KAGGLE_API_TOKEN:
-        logger.error("Missing KAGGLE_USERNAME or KAGGLE_API_KEY in environmental variable file.")
+        logger.error("Missing KAGGLE_USERNAME or KAGGLE_API_TOKEN in environmental variable file.")
         return False # Stops here. Signals failure.
 
-    # 1.3
+    # 1.3 We set credentials as environment variables (no file written to disk)
+    os.environ["KAGGLE_USERNAME"] = config.KAGGLE_USERNAME
+    os.environ["KAGGLE_API_TOKEN"] = config.KAGGLE_API_TOKEN
+
+    # 1.4
     # We use importlib because importlib bypasses importerror to check if a package is available. 
     # Why are we bypassing import error? because there are several reasons why import error can be thrown.
     # Because import error occurs due to any missing dependencies, import error could still occur when kaggle is installed.
-    # 1.3.1 We check if kaggle is installed using importlib (import library).
+    # 1.4.1 We check if kaggle is installed using importlib (import library).
     if importlib.util.find_spec("kaggle") is None: #kaggle is third-party Python package for accessing kaggle features locally
         logger.warning("kaggle not found")
         # 1st Attempt - Normal 
@@ -66,13 +70,13 @@ def download_kaggle_dataset(retries=config.MAX_RETRIES):
         # This code tries to import kaggle and if it fails tells us that there could be several reasons why this failed
         try:
             import kaggle
-        except ImportError:
-            logger.exception("Our importation attempt failed after our installation attempt was completed. Could be due to several reasons.")
+        except Exception as e:                                                                                              # There are other eeors that can be raised beyond ImportError
+            logger.exception(f"Our importation attempt failed after our installation attempt was completed. Could be due to several reasons.{e}")
             return False # Stops. Signals failure. Don't move forward
         else:
             logger.info("kaggle was imported successfully after our installation attempt.")
 
-    # 1.3.2 This block runs if kaggle can be found. It tries to import kaggle
+    # 1.4.2 This block runs if kaggle can be found. It tries to import kaggle
     else:
         try:
             import kaggle
@@ -84,16 +88,13 @@ def download_kaggle_dataset(retries=config.MAX_RETRIES):
             logger.info("Kaggle was installed earlier. Kaggle is imported successfully")
         
     # At this point, we can say that Kaggle should have been imported. Hence, we should start preparing to download the data
-        
-    # 1.4 We set credentials as environment variables (no file written to disk)
-    os.environ["KAGGLE_USERNAME"] = config.KAGGLE_USERNAME
-    os.environ["KAGGLE_API_TOKEN"] = config.KAGGLE_API_TOKEN
+
 
     # 1.5 We download with retries
     os.makedirs(config.SALES_DATA_DOWNLOAD_PATH, exist_ok = True)
     for attempt in range(1, retries + 1):
         if os.path.exists(cafe_sales_file_path):
-            logger.info(f"Download complete. Files saved to: {config.SALES_DATA_DOWNLOAD_PATH}")
+            logger.info(f"File already exists at: {config.SALES_DATA_DOWNLOAD_PATH}")
             return True
         # The above block of codes should not run on the first attempt because the file does not exists. 
         # On the second or third attempt the above block completes the loop because the file path should exist in that instance. 
@@ -114,6 +115,11 @@ def download_kaggle_dataset(retries=config.MAX_RETRIES):
         # This code whose purpose is to inform us of the commencement of another attempt only runs if download fails.
         if not os.path.exists(cafe_sales_file_path):
             logger.warning(f"Attempt {attempt} failed. Retrying...") # Codes reruns because of the loop
+        
+        # break
+        if os.path.exists(cafe_sales_file_path):
+            logger.info(f"Download complete. Files saved to: {config.SALES_DATA_DOWNLOAD_PATH}")
+            break
 
 
     # This code whose purpose is to inform us that all attempt failed only runs if the path does not exist yet after the loop is complete.
@@ -142,7 +148,7 @@ def extract():
     
 
 # Orchestrator Function (This controls the order of functions, helping us ensure that each function runs sequentially) 
-def run_extract_sequence():
+def run_extract_sequence() -> pd.DataFrame:
     logger.info("Starting Download Step and Extraction Step...")
 
     if download_kaggle_dataset(): # This runs first
@@ -153,10 +159,10 @@ def run_extract_sequence():
             return cafe_sales # This cafe_sales data would be needed in other sequences in the pipeline. 
         else:
             logger.error("\nExtraction failed.")
-            raise KeyError
+            raise FileNotFoundError
     else: 
         logger.error("\nDownload failed...")
-        raise FileNotFoundError
+        raise RuntimeError
 
 # Script guard (This controls when the code runs, helping us ensure the code runs if we call it directly.) 
 
