@@ -428,7 +428,6 @@ class CleanCafeSales:
                 # We want to know the number of rows where both Item and Price Per Unit are empty.
                 affected_rows = mask_item_price_total_empty.sum()
                 
-                # Create a list of the keys and specify the number of items to be randomly returned based on the number of empty values 
                 random_items = random.choices(list(item_price_dict.keys()), k = int(mask_item_price_qt_empty.sum())) 
 
                 # Fill all the records in Item column where both Item and Price Per Unit are empty with random_items
@@ -517,8 +516,7 @@ class CleanCafeSales:
                 logger.exception(f"Error occured while filling Price Per Unit column with the division of values in Total Spent and Quantity after applying probability approach to Quantity:{e}")
                 raise
 
-
-            # 3.3 Flip the items and price dictionary and map iems to price 
+            # 3.3 Flip the items and price dictionary and map iTems to price 
             try:
                 # we use a flipped dictionary 
                 item_price_dict = CleanCafeSales.unique_item_price (cafe_sales)
@@ -530,7 +528,37 @@ class CleanCafeSales:
             except Exception as e:
                 logger.exception(f"Attempt to fill Item column with Price Per Unit failed after applying the probabilistic apporach failed: {e}.")
                 raise
+            else:
+                # Let's check that all Items have been 
+                if cafe_sales ['Price Per Unit'].notna().all() & cafe_sales ['Quantity'].notna().all() & cafe_sales['Total Spent'].notna().all():
+                    logger.info("Price Per Unit, Quantity & Total Spent columns are no longer empty")
+                
 
+                if cafe_sales['Item'].isna().any():
+                    mask_items_left = cafe_sales ['Item'].isna() & cafe_sales ['Price Per Unit'].notna() & cafe_sales ['Quantity'].notna() & cafe_sales['Total Spent'].notna()
+                    sum_mask = mask_items_left.sum()
+                    logger.info(f"There are still {sum_mask} rows where Item is empty while Price Per Unit, Quantity and Total Spent are completely filled. Filling now...")
+
+                    logger.info(f"Overridding {sum_mask} rows for consistency...")
+
+                    item_price_dict = CleanCafeSales.unique_item_whole_price(cafe_sales)
+
+                    item_random_list = random.choices(list(item_price_dict.keys()), k = int(sum_mask))
+
+                    try: 
+                        cafe_sales.loc [mask_items_left, 'Item'] = item_random_list
+                        cafe_sales.loc [mask_items_left, 'Price Per Unit'] = list(map(item_price_dict.get, item_random_list))
+                        cafe_sales.loc [mask_items_left, 'Quantity'] = cafe_sales.loc [mask_items_left, 'Total Spent'] / cafe_sales.loc [mask_items_left, 'Price Per Unit']
+                        logger.info(f"filled {sum_mask} rows by finding item, and using item to find price and then finding Quantity with the Total Spent/ Price Per Unit - Third probabilistic approach")
+                    except Exception as e:
+                        logger.exception(f"Filling item - third probabilistic approach failed: {e}")
+                        raise
+                    else: 
+                        if cafe_sales['Item'].isna().any():
+                            still_missing_rows_item = cafe_sales['Item'].isna().sum()
+                            logger.error(f"fill_item_price_probability_approach function still leaves {still_missing_rows_item} cells empty in Item column.")
+                            raise ValueError
+            
         return cafe_sales
 
     
@@ -538,7 +566,8 @@ class CleanCafeSales:
     def fill_empty_quantity_total_probabilistic_approach (cafe_sales):
 
         # Second level of Probabilistic Approach
-        # 2.0 rows where Item, Price Per Unit, Quantity and Total Spent columns are all empty    
+        # 2.0 rows where Item, Price Per Unit, Quantity and Total Spent columns are all empty
+        # I expect this step to be skipped. 
 
         cafe_sales = cafe_sales.copy()
 
