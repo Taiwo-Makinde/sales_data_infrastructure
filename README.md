@@ -45,13 +45,15 @@ Each of the three pipelines follows the same four steps:
 
 | Folder | Purpose | When to Use |
 | ------ | ------- | ----------- |
-| **data_warehouse/** | PostgreSQL database modelled as a fact constellation/star cluster: multiple fact tables share common dimension tables | Database setup, schema changes, understanding warehouse architecture |
-| **datasets/** *(gitignored)* | Raw and intermediate CSV files downloaded from Kaggle | Local staging area between Extract (including Download, Read) & Transform sequence |
+| **data_warehouse/** | PostgreSQL database modeled as a fact constellation / star cluster — multiple fact tables share common dimension tables | Database setup, schema changes, understanding warehouse architecture |
+| **datasets/** *(gitignored)* | Raw and intermediate CSV files downloaded from Kaggle | Local staging area between Extract/Download and Read/Transform steps |
 | **pipeline/** | The three ETL pipelines, each in its own subfolder | Running, modifying, or debugging extract/transform/load logic |
+| **dags/** | Orchestration DAGs (e.g. Airflow) that schedule and sequence the three pipelines | Scheduling pipeline runs, defining task dependencies/order, retries |
 | **sales_data_logs/** | Logs for both database operations and pipeline runs | Monitoring runs, debugging failures, auditing loads |
 | **tests/** | Unit and integration tests for pipelines and the database | Validating pipeline correctness before/after changes, CI/CD |
-| **config/** *(gitignored)* | `.env` files: Kaggle API credentials, PostgreSQL connection strings, other secrets | Configuring environment-specific settings |
+| **config/** *(gitignored)* | `.env` files — Kaggle API credentials, PostgreSQL connection strings, other secrets | Configuring environment-specific settings |
 | **sales_data_notebooks/** | Jupyter notebooks documenting exploratory data analysis and the reasoning behind each cleaning/transform step | Understanding data quality issues, prototyping and justifying transformations |
+ 
 
 ---
 
@@ -117,10 +119,11 @@ pipeline/
  
 ## Supporting_Folders
  
-- **`sales_data_notebooks/`** — Each notebook corresponds to a pipeline (or a specific dataset) and walk through: initial data exploration → data quality issues found → the effect of each cleaning/transformation step, before that logic is finalized into `pipeline/*/transform/`.
-- **`tests/`** — covers both pipeline logic (extract/read/transform/load steps) and database integrity (constraints, composite key relationships, fact-to-dimension joins).
-- **`sales_data_logs/`** — separates pipeline execution logs from database logs (e.g `sales_data_logs/cafe_sales_pipeline.log/` and `sales_data_logs/database/`) to make debugging failures faster.
-- **`config/`** — Stores separate `.env` files for the data pipeline. The folder is gitignored by design.
+- **`dags/`** — Each DAG should correspond to one pipeline (or one combined DAG if the three pipelines must run in a fixed order due to composite key dependencies), defining schedule, task order, and retry behavior for the `extract → download → read → transform → load` steps in `pipeline/`.
+- **`sales_data_notebooks/`** — Each notebook should correspond to a pipeline (or a specific dataset) and walk through: initial data exploration → data quality issues found → the effect of each cleaning/transformation step, before that logic is finalized into `pipeline/*/transform/`.
+- **`tests/`** — Should cover both pipeline logic (extract/read/transform/load steps) and database integrity (constraints, composite key relationships, fact-to-dimension joins).
+- **`sales_data_logs/`** — Should separate pipeline execution logs from database logs (e.g. `sales_data_logs/pipeline/` and `sales_data_logs/database/`) to make debugging failures faster.
+- **`config/`** — Store separate `.env` files per environment if needed (e.g. `.env.dev`, `.env.prod`), and never commit these — the folder is gitignored by design.
 ---
  
 ## Environment-Configuration
