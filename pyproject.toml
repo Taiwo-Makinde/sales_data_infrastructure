@@ -1,0 +1,10 @@
+[project]
+name = "sales_data_logs"
+version = "0.1.0"
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["sales_data_logs"]

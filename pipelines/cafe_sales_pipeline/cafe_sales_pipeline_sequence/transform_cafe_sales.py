@@ -1,0 +1,815 @@
+# Transformation
+
+# Import the packages in the standard python module
+import logging                               # for logging
+import random 
+random.seed(5)                               # 5 is a lucky number; I am specifying 5 so that the random shuffle is reproducible 
+from decimal import Decimal                  # Our transformation involves accuracy. Although slow, Decimal is a better choice withworking with fractional values than float64 and it should be compatible with our data warehouse (numeric)
+
+# Importing third-party python packages
+import numpy as np
+import pandas as pd
+
+# Importing local customised packages 
+
+from sales_data_logs.sales_data_logging_config import setup_logging  # My personalise logging module that outputs logs in single-line json format.
+from cafe_sales_pipeline_sequence.extract_cafe_sales import run_extract_sequence
+
+# We set up our logger 
+
+logger = logging.getLogger(__name__) # We use __name__ so that it correctly resolves to the module name and file name cafe_sales_pipeline_sequence + transform_cafe_sales
+
+
+class CleanCafeSales:
+    # The class is for orgnisation purposes. So we use decorator @staticmethod to show that it is just for organisation. 
+
+    # We noticed that some cells are represented as unknown and error
+    # We want to replace UNKNOWN and ERROR with nan.
+
+    @staticmethod # I want to inform python that the method following the decorator does not need access to the instance self or the class cls. 
+    def convert_error_unknown_to_null(cafe_sales: pd.DataFrame) -> pd.DataFrame:
+        """This function takes in the cafe_sales dataframe, converts all column data type to string while mantinaing null values, 
+        converts all 'ERROR' and 'UNKNOWN' to null values (nan) for further data cleaning.
+        """
+        # We convert all columns datatype to string
+        cafe_sales = cafe_sales.copy()
+        try: 
+            # I use .astype("string") instead of .astype(str) because the method converts the columns to string while preserving native pandas null values.  
+            cafe_sales = cafe_sales.astype("string") 
+        except Exception as e:
+            logger.exception(f"Attempt to convert all columns to string data type failed : {e}")
+            raise 
+        else:
+            logger.info("Successfully converted all columns to string data type")
+
+        # Now that UNKNOWN and ERROR have become 'UNKNOWN' AND 'ERROR', let's replace them
+        try:
+            mask_unknown = (cafe_sales == 'UNKNOWN').fillna(False).astype(bool)                                 # fillna(False) so that we can work with the mask  
+            mask_error = (cafe_sales == 'ERROR').fillna(False).astype(bool)            
+
+            cafe_sales.mask(mask_unknown, np.nan, inplace = True)
+            cafe_sales.mask(mask_error, np.nan, inplace = True)
+
+        except Exception as e :
+            logger.exception(f"Attempt to replace 'UNKNOWN' and 'ERROR' with null values failed : {e}")
+            raise
+        else:
+            logger.info(f"Successfully replaced 'UNKNOWN' text in {mask_unknown.to_numpy().sum()} cells and 'ERROR' texts in {mask_error.to_numpy().sum()} cells with null values.")
+            
+        return cafe_sales
+
+
+    # float has float noise that does not capture the exact number we have, 
+    # decimal captures the number but it is slow and .sum() does not work properly so we cannot know what rows which are affected (cafe_sales ['Quantity].isna().sum()) would fail 
+    # pyspark's DecimalType would have been fast and efficent if our dataset were bigger otherwise it is still slow and we also would need to change the codes' whole logic completely in line with pyspark.
+    # pyarrow's decimal type is still not sufficient because it works with vectorization while some of our operations are per row.
+    
+    # We would convert these columns to decimal, multiply by 100 and then convert to integer. Later, we divide by 100 and convert back to decimal. 
+
+    @staticmethod
+    def convert_quantity_price_total_date(cafe_sales):
+        """This function takes in the cafe_sales dataframe as a parameter,
+        converts the data type for Quantity to number,
+        the data type for Price Per Unit and Total Spent columns to Decimal, 
+        and returns the dataframe.
+        """
+        cafe_sales = cafe_sales.copy()
+
+        # We create a function that converts columns to Decimaland then multiplies by cent
+        def convert_to_decimal_n_cent (y):
+            if pd.isna(y):
+                return pd.NA
+            return int(Decimal(str(y)) *100)
+        
+
+        # Convert Quantity column to Integer and then apply function that converts it to cent
+        try:
+            cafe_sales['Quantity'] = pd.to_numeric(cafe_sales['Quantity'], errors = 'coerce').astype("Int64")                  
+             
+        except Exception as e:
+            logger.exception(f"Some error occurred during the conversion of Quantity column to Integer: {e}")
+            raise
+        else:
+            logger.info("Quantity column's datatype successfully converted to Integer.")
+
+                               
+        # Convert Price column to Decimal (by applying the  convert_to_decimal_n_cent function)
+        try:
+            cafe_sales['Price Per Unit'] = cafe_sales['Price Per Unit'].apply(convert_to_decimal_n_cent)
+            # We use Decimal because we want to do some mathematical calculations. 
+        except Exception as e: 
+            logger.exception(f"Some error occured during conversion of Price Per Unit to Decimal: {e}")
+            raise
+        else:
+            logger.info("Price Per Unit column's datatype successfully converted to Decimal")
+
+
+        # Convert Total Spent column to Decimal (by also applying the  convert_to_decimal_n_cent function)
+        try:
+            cafe_sales['Total Spent'] = cafe_sales['Total Spent'].apply( convert_to_decimal_n_cent)
+        except Exception as e:
+            logger.exception(f"Some error occured during the conversion of Total Spent column to Decimal: {e}")
+            raise
+        else:
+            logger.info("Total Spent column's datatype successfully converted to Decimal")
+
+        # Convert Transcation date column to datetime 
+        try:
+            cafe_sales['Transaction Date'] = pd.to_datetime(cafe_sales["Transaction Date"], errors = 'coerce')
+        except Exception as e:
+            logger.exception(f"Coversion of datatype fo Transaction date column failed: {e}")
+            raise
+        else:
+            logger.info("Successfully coverted the datatype for 'Transaction Date' to datetime")
+
+        return cafe_sales
+
+    @staticmethod
+    def fill_price_with_quantity_total (cafe_sales):
+        """
+        This function takes in the dataframe cafe_sales as a parameter,
+        fills the empty cells in Price Per Unit column by dividing the adjacent values of Total Spent and Quantity columns,
+        returns the dataframe
+        """
+        cafe_sales = cafe_sales.copy()
+
+        # Deterministic Method to finding Price using Total Spent and Quantity (1st Approach: Deterministic; 1st Method: Using Total/Quantity). 
+        mask_empty_price = cafe_sales['Price Per Unit'].isna() & cafe_sales['Total Spent'].notna() & cafe_sales['Quantity'].notna()
+        cells_affected = mask_empty_price.to_numpy().sum()
+
+        try:
+            cafe_sales.loc[mask_empty_price, 'Price Per Unit'] = cafe_sales.loc[ mask_empty_price, 'Total Spent'] / cafe_sales.loc [
+                mask_empty_price, 'Quantity']
+        except Exception as e:
+            logger.exception(f"Error occured while filling Price Per Unit column with the division of values in Total Spent and Quantity:{e}")
+            raise
+        else:
+            logger.info(f"Successfully filled {cells_affected} cells in the Price Per Unit column with division of Total Spent and Quantity columns.")
+
+        return cafe_sales
+
+    @staticmethod
+    def unique_item_price(cafe_sales) -> dict[str, int]:                      # Function returns string and decimal  # this needs to be fixed
+        """
+        
+        """
+        cafe_sales = cafe_sales.copy()
+        try:
+            item_price_dict = (
+                        cafe_sales [['Item', 'Price Per Unit']]                 # Selecting the two columns (Item and Price Per Unit)
+                        .dropna()                                               # I remove null values
+                        .drop_duplicates(subset = ['Item'], keep = 'first')     # I remove duplicates 
+                        .set_index('Item')['Price Per Unit']                    # Set the index to Item which makes the dataframe a series where index is item and column is Price Per Unit
+                                           .to_dict()                           # I convert the series to a dictionary, so that I can map it. 
+                    )
+        except Exception as e:
+            logger.exception(f"{e}")
+            raise 
+
+        return item_price_dict
+
+    
+    @staticmethod
+    def fill_price_based_on_item (cafe_sales):
+        """
+        This function takes in the dataframe cafe_sales as a parameter, 
+        creates a dictionary out of the unique values of Item and Price Per Unit
+        fills Price Per Unit column by mapping its content (as values) to content (as keys) in Items columns;
+        It returns the new dataframe and the dictionary for subsequent use.
+        """
+        cafe_sales = cafe_sales.copy()
+
+        # Deterministic Method to finding Price using Item (1st Approach: Deterministic; 2nd Method: Using Item ) We use unique values with price allowed to be fractional. 
+        item_price_dict = CleanCafeSales.unique_item_price (cafe_sales)
+
+        mask_empty_price = (cafe_sales ['Price Per Unit'].isna() & cafe_sales ['Item'].notna()) # The appropriate operator is the bitwise & not boolean operator 'and' 
+        cells_affected = mask_empty_price.to_numpy().sum()
+        rows_affected = mask_empty_price.sum()
+        # ".sum()) takes sum of rows, > 0 checks if the sum of rows is greater than 0 returns the output as True if it is and otherwise returns False
+        # .sum() takes the sum of all rows containing True
+
+        try: 
+            cafe_sales.loc [mask_empty_price, 'Price Per Unit'] = cafe_sales.loc [mask_empty_price, 'Item'].map(item_price_dict)
+        except Exception as e:
+            logger.exception(f"Attempt to fill Price Per Unit Column with Item failed: {e}.")
+            raise
+        else:
+            logger.info(f"Successfully filled Price Per Unit column with Item in {rows_affected} rows with {cells_affected} cells affected.") 
+
+        return cafe_sales 
+
+
+    @staticmethod
+    def fill_empty_quantity_total (cafe_sales):
+        """
+        This function takes in the dataframe cafe_sales as a parameter, 
+        fills the empty cells in quantity by dividing the adjacent values of Total Spent and Price Per Unit columns,
+        fills the empty cells in Total Spent by  multiplying the adjacent values of Quanity and Price Per Unit,
+        returns the dataframe.
+        """
+        cafe_sales = cafe_sales.copy()
+
+        # Deterministic Approach to finding Quantity and Total Spent using adjacent values 
+       
+        # let's create a mask for each of these steps 
+        mask_empty_quantity = cafe_sales['Quantity'].isna() & cafe_sales['Total Spent'].notna() & cafe_sales[
+            'Price Per Unit'].notna()
+        mask_empty_total = cafe_sales['Total Spent'].isna() & cafe_sales['Quantity'].notna() & cafe_sales[
+            'Price Per Unit'].notna()
+
+        quantity_affected = mask_empty_quantity.sum()
+        total_filled = mask_empty_total.sum()
+
+        # To find the values for empty cells in Quantity column 
+        try :
+            cafe_sales.loc[mask_empty_quantity, 'Quantity'] = cafe_sales.loc[ mask_empty_quantity, 'Total Spent'] / cafe_sales.loc [
+                mask_empty_quantity, 'Price Per Unit']
+        except Exception as e:
+            logger.exception(f"Error occured while filling Quantity column with the division of values in Total Spent and Price : {e}.")
+            raise
+        else:
+            logger.info(f"Successfully filled Quantity column with division of Total Spent and Price columns, {quantity_affected} rows affected.")
+
+        # To find the values for the empty cells in Total Spent
+        try: 
+            cafe_sales.loc[mask_empty_total, 'Total Spent'] = cafe_sales.loc[ mask_empty_total, 'Quantity'] * cafe_sales.loc [
+                mask_empty_total, 'Price Per Unit']
+        except Exception as e:
+            logger.exception(f"Error occured while filling Price Per Unit column with the division of values in Total Spent and Quantity:{e}")
+            raise
+        else:
+            logger.info(f"Successfully filled Total Spent column with the multiplication of Quantity and Price columns, {total_filled} rows affected.")
+    
+        return cafe_sales
+
+
+    @staticmethod
+    def fill_empty_item (cafe_sales):
+        """
+        This function takes in the dataframe cafe_sales as a parameter, 
+        flips the item_price_dict dictionary (keys for values, values for keys)
+        fills Item column by mapping its content (as values) to content (as keys) in Price Per Unit columns;
+        It returns the new dataframe and the dictionary for subsequent use.
+        fills the empty cells in quantity by dividing the adjacent values of Total Spent and Price Per Unit columns,
+        fills the empty cells in Total Spent by  multiplying the adjacent values of Quanity and Price Per Unit,
+        returns the dataframe.
+        """
+        cafe_sales = cafe_sales.copy()
+
+        # 1st Approach (deterministic) : Use the values in Price Per Unit to find Item 
+        # We flip the dictionary 
+        item_price_dict = CleanCafeSales.unique_item_price (cafe_sales)
+        price_item_dict = {v : k for k, v in item_price_dict.items()}
+
+        # I create a mask filter
+        mask_empty_item = cafe_sales ['Item'].isna() & cafe_sales ['Price Per Unit'].notna()
+
+        # We want to know the number of rows affected
+        rows_affected = mask_empty_item.sum()
+        
+
+        try:
+            cafe_sales.loc [mask_empty_item, 'Item'] = (cafe_sales.loc [mask_empty_item, 'Price Per Unit'].map(price_item_dict))
+        except Exception as e:
+            logger.exception(f"Attempt to fill Item column with Price Per Unit failed: {e}.")
+            raise
+        else:
+            logger.info(f"Successfully filled {rows_affected} rows in the Item column by apping it with the equivalent value in the Price Per Unit column.") 
+
+        return cafe_sales
+
+    # We want to make sure that we have the original distribution as this might be skewed as we apply probabilistic imputation. 
+    original_quantity_distribution = None                                                   # Empty but would be populated when the next line of codes run
+
+
+    @staticmethod
+    # function that populates the variable original_quantity_distribution
+    def capture_original_quantity_distribution(cafe_sales):
+        """
+        """
+        try:
+            CleanCafeSales.original_quantity_distribution = cafe_sales ['Quantity'].value_counts(normalize = True)
+            logger.info("The distribution of values Quantity is captured immediatley after our deterministic apporach has been applied.")
+        except Exception as e:
+            logger.exception(f"Unable to capture original value distribution of Quantity column")
+
+        return cafe_sales
+
+
+    @staticmethod
+    # Probabilistic Approach
+    def fill_item_price_probabilistic_approach (cafe_sales):
+        """
+        This function takes in cafe_sales as a parameter,
+        checks if Item and Price Per Unit columns are filled,
+        if they are, fills Quantity column with random numbers based on probability and derives Total Spent values from the multiplication of Price Per Unit and Quantity,
+        if they aren't, fills Item column with random items by probability, derives price and from price derives Quantity and Total Spent,
+        and returns the dataframe.
+        """
+
+        # We have tried filling Price Per Unit column cells in two ways:
+        # 1. filling price based on the values of Items (there is a standard price for each item; a key-value pair: values of Price Per Unit mapped to the keys of Items)
+        # 2. filling price based on the division of Total Spent and Quantity (Total spent is Price * Quantity)
+
+        # At this point, we should be left with four possibilities in regard to Item, Price Per Unit, Quantity and Total Spent columns.
+        # i. rows where Item, Price Per Unit, Quantity and Total Spent columns are all empty                       # Second level of probability approach (2.0) solves this
+        # ii. rows where Item, Price Per Unit and Quantity columns are empty but Total Spent column is not empty   # 1.2.2 solves this
+        # iii. rows where Item, Price Per Unit and Total Spent columns are empty but Quantity column is not empty  # 1.2.1 solves this
+        # iv. rows where Quantity and Total Spent columns are empty but Item and Price columns are not empty.      # 1.1 (1.1.1 & 1.1.2) solves this
+
+        # Hence, in summary under the first level of probability approach (1.0) this function has two situations ( more like three situations)
+        # 1.1 Where Item and Price Per Unit columns are completely filled, but Quantity and Total Spent are empty.
+        # 2.0 Where Item, Price Per Unit, and Total Spent columns are empty, but Quantity is filled. 
+        # 3.0 Where Item, Price Per Unit and Quantity columns are empty, but Total Spent is filled. 
+
+        cafe_sales = cafe_sales.copy()
+
+        # let's create a mask for all scenarios. We are using mask filter as a freeze in time. This will ensure our codes still works even though no cell in Item column would be empty when the second code runs
+
+        # Mask for 1.0
+        empty_quantity_total = (cafe_sales['Item'].notna() & cafe_sales ['Price Per Unit'].notna() & cafe_sales['Quantity'].isna() & cafe_sales['Total Spent'].isna())
+
+        # Mask for 2.0
+        mask_item_price_total_empty = (                                                                                                 # We are using brackets to instruct Python the order of execution. 
+                    (cafe_sales['Item'].isna() & cafe_sales ['Price Per Unit'].isna())
+                      & (cafe_sales['Total Spent'].isna() & cafe_sales['Quantity'].notna() )
+                        ) 
+        
+        # Mask for 3.0 
+        mask_item_price_qt_empty = (
+            (cafe_sales['Item'].isna() & cafe_sales ['Price Per Unit'].isna()) & 
+            (cafe_sales['Quantity'].isna() & cafe_sales['Total Spent'].notna())
+            )
+
+        # 1.0
+        if empty_quantity_total.any():
+            logger.info("There are some rows where there are no empty cells in Item or Price Per Unit columns, but there are still empty cells in Quantity and Total Spent columns. Filling them now...")
+
+            logger.info("Filling Quantity column with probability approach")
+
+            # 1.1 Fill Quantity with first randomly based on the number of appearance. 
+            try:
+                # I take a sum of  the affected rows
+                sum_empty_quantity_total = empty_quantity_total.sum()
+
+                quantity_proportions = CleanCafeSales.original_quantity_distribution
+
+                empty_quantity_total_count = empty_quantity_total.sum() # We take a count of all rows where Quantity and Total Spent cells are empty 
+        
+
+                quantity_method_to_add = [] # create an empty list
+
+                # I create loop through the dictionary (quantity value & proportion pair)
+                for quant, prop in quantity_proportions.items():
+                    quantity_method_to_add.extend([quant] * round(prop * empty_quantity_total_count)) 
+                                                  # to get a proportion distribution, we round up the multiplication of proportion and the number of empty cells.
+                    # we take the proportion distribution (how many times should a value appear) and then multiply the unique_values based on the proportion distribution.
+                    #So that the unique values are distributed in the list based on the proportion distribution.
+
+                while len(quantity_method_to_add) < empty_quantity_total_count:
+                    quantity_method_to_add .extend(
+                        random.choices(quantity_proportions.index.tolist(), weights =quantity_proportions.values, k =empty_quantity_total_count - len(quantity_method_to_add) )
+                    )
+            
+                # We shuffle the list randomly
+                random.shuffle(quantity_method_to_add)
+
+                # We input the shuffled list into every Quantity column rows where Quantity and Total Spent columns
+                cafe_sales.loc [empty_quantity_total, 'Quantity'] = quantity_method_to_add [:empty_quantity_total_count]
+
+                logger.info(f"Successfully filled {sum_empty_quantity_total} cells in Quantity column using probability where Item and Price Per Unit columns were not empty.")
+
+            except Exception as e:
+                logger.exception(f"Attempt to fill Quantity column based on probability where Item and Price Per Unit columns were not empty failed: {e}.")
+                raise
+
+            # 1.2 After empty rows in Quantity column have been filled randomly based on the proportion of the frequency of their apppearance, fill Total Spent. 
+            try:
+                # Total Spent is still empty
+                # I create a mask that filters for empty cells in Total Spent column and no empty values in Quantity column as well as Item and Price Per Unit
+                empty_total = cafe_sales['Item'].notna() & cafe_sales ['Price Per Unit'].notna() & cafe_sales ['Total Spent'].isna() & cafe_sales ['Quantity'].notna() 
+
+                # A sum of all affected rows. 
+                sum_empty_total = empty_total.sum()
+
+                # We solve for Total Spent 
+                cafe_sales.loc [empty_total, 'Total Spent'] = cafe_sales.loc [empty_total, 'Quantity'] * cafe_sales.loc [
+                empty_total, 'Price Per Unit']
+
+            except Exception as e:
+                logger.exception(f"Attempt to fill Total Spent column after using probability approach to fill Quantity column failed: {e}")
+                raise
+            else:
+                logger.info(f"Successfully filled {sum_empty_total} cells in Total Spent column after using probability approach to fill Quantity column.")
+
+
+        # 2.0 Where Item, Price Per Unit, and Total Spent columns are empty, but Quantity is filled. 
+
+        if mask_item_price_total_empty.any():
+            
+            logger.info("There are some rows Item, Price Per Unit and Total Spent columns are empty while Quantity is filled. Filling them now...")
+
+            # 2.1 Fill Item with random 
+            try: 
+                item_price_dict = CleanCafeSales.unique_item_price(cafe_sales)
+
+                # We want to know the number of rows where both Item and Price Per Unit are empty.
+                affected_rows = mask_item_price_total_empty.sum()
+                
+                random_items = random.choices(list(item_price_dict.keys()), k = int(mask_item_price_qt_empty.sum())) 
+
+                # Fill all the records in Item column where both Item and Price Per Unit are empty with random_items
+                cafe_sales.loc [mask_item_price_total_empty, 'Item'] = random_items
+
+                logger.info(f"Successfully filled Item column with the probability approach in {affected_rows} rows")
+
+            except Exception as e : 
+                logger.exception(f"Attempt to randomly fill Item column with the probability approach failed: {e}")
+                raise
+            else:  
+                # Let's check that all Items have been filled
+                if cafe_sales['Item'].isna().any():
+                    still_missing_item = cafe_sales['Item'].isna().sum()
+                    logger.warning(f"{still_missing_item} rows in Item column still have empty cells.")
+
+
+            # 2.2 Map Price Per Unit to the new randomly generated keys Items columns
+            try:
+                
+                #Find all the cells in Price Per Unit column where the adjacent cells of Item and Price Per Unit were empty and fill the cells with the dictionary's values from Item
+                cafe_sales.loc [mask_item_price_total_empty, 'Price Per Unit'] = list(map(item_price_dict.get, random_items))
+                
+                logger.info(f"Successfully filled Price Per Unit column with the probability approach in {affected_rows} rows")
+            except Exception as e:
+                logger.exception(f"Attempt to randomly fill Item column with the probability approach failed: {e}")
+                raise
+            else:
+                # Let's check that all Price Per Unit column have been filled 
+                if cafe_sales['Price Per Unit'].isna().any():
+                    still_missing_price = cafe_sales ['Price Per Unit'].isna().sum()
+                    logger.warning(f"There are still {still_missing_price} empty cells in Price Per Unit columns.")
+
+
+            # 2.3 Let's solve for Total Spent 
+            try: 
+                cafe_sales.loc[mask_item_price_total_empty, 'Total Spent'] = cafe_sales.loc[mask_item_price_total_empty, 'Quantity'] * cafe_sales.loc [
+                 mask_item_price_total_empty, 'Price Per Unit']
+                logger.info(f"Successfully filled {affected_rows} rows in Total Spent column with Quantity and Price columns - first level probabilistic aprproach.")
+            except Exception as e:
+                logger.exception(f"Error occured while filling Total Spent column with the mul;tiplication of Quanity and Price Per Unit - first level probabilistic aprproach:  {e}")
+                raise
+
+                
+        # 3.0 Where Item, Price Per Unit and Quantity columns are empty, but Total Spent is filled. 
+        if mask_item_price_qt_empty.any():
+            item_price_dict = CleanCafeSales.unique_item_price(cafe_sales)
+
+            candidates = (5, 4, 3, 2, 1)
+
+            price_to_items = {}
+
+            for item_name, price_cents in item_price_dict.items():
+                price_to_items.setdefault(price_cents, []).append(item_name)
+
+            rows_not_resolved = 0
+
+            for row_index in cafe_sales.index [mask_item_price_qt_empty]:
+                total_spent_cents = cafe_sales.at[row_index, 'Total Spent']
+
+                if pd.isna(total_spent_cents) or total_spent_cents <= 0:
+                    rows_not_resolved += 1
+                    continue
+
+                quantity_found = None
+                price_found = None
+                item_found = None
+
+
+                for candidate_quantity in candidates:
+                    divides_evenly = (total_spent_cents % candidate_quantity) == 0
+                    if not divides_evenly:
+                        continue
+
+
+                    candidate_price_cents = total_spent_cents // candidate_quantity
+
+                    if candidate_price_cents in price_to_items:
+                        quantity_found = candidate_quantity
+                        item_found = random.choice(price_to_items[candidate_price_cents])                     # random.choice gives you the item itself while random.choices always gives a list.  
+                        price_found = item_price_dict[item_found]
+                        break
+
+
+                if quantity_found is not None:
+                    cafe_sales.at[row_index, 'Quantity'] = quantity_found
+                    cafe_sales.at[row_index, 'Price Per Unit'] = price_found
+                    cafe_sales.at[row_index, 'Item'] = item_found
+
+                else:
+                    rows_not_resolved += 1
+
+            if rows_not_resolved > 0:
+                logger.warning(
+                    f"{rows_not_resolved} rows: no Quantity between 1 and 5 both divided Total Spent evenly,"
+                    f"and matched a real item's price. Please resolve these rows"
+                    )
+            
+        return cafe_sales
+
+    
+    @staticmethod
+    def fill_empty_quantity_total_probabilistic_approach (cafe_sales):
+
+        # Second level of Probabilistic Approach
+        # 2.0 rows where Item, Price Per Unit, Quantity and Total Spent columns are all empty
+        # I expect this step to be skipped. 
+
+        cafe_sales = cafe_sales.copy()
+
+        item_price_dict = CleanCafeSales.unique_item_price(cafe_sales)
+
+        if cafe_sales ['Item'].notna().all() & cafe_sales ['Price Per Unit'].notna().all() & cafe_sales['Quantity'].notna().all() & cafe_sales['Total Spent'].notna().all():
+            logger.warning("Item, Price Per Unit, Quantity and Total Spent are completely filled. Skipping this step...")
+            return cafe_sales
+        
+        # masks : rows where Item, Price Per Unit, Quantity and Total Spent columns are all empty 
+        empty_item_price_quantity_total = cafe_sales['Item'].isna() & cafe_sales['Price Per Unit'].isna() & cafe_sales['Quantity'].isna() & cafe_sales['Total Spent'].isna() 
+
+        # Afffected rows
+        affected_empty_rows = empty_item_price_quantity_total.sum()
+
+        # Create a list of the keys and specify the number of items to be randomly returned based on the number of empty values 
+        random_items = random.choices(list(item_price_dict.keys()), k = int(empty_item_price_quantity_total.sum())) 
+
+
+        # 2.0.1
+        # Fill Item column with random values from the dictionary keys when both Item, Price Per Unit,Quantity and Total Spent are empty 
+        try: 
+            # Fill all the records in Item column where both Item and Price Per Unit are empty with random_items
+            cafe_sales.loc [empty_item_price_quantity_total, 'Item'] = random_items
+        except Exception as e : 
+            logger.exception(f"Attempt to randomly fill Item column with the probability approach (second-level) failed: {e}")
+            raise
+        else:
+            logger.info(f"Successfully filled Item column with the probability approach (second level) in {affected_empty_rows} rows")
+
+        # Let's check that all Items have been filled
+        if cafe_sales['Item'].isna().any():
+            still_missing_item = cafe_sales['Item'].isna().sum()
+            logger.warning(f"There are still {still_missing_item} empty cells in Item column after second-level probability approach.")
+
+
+        # 2.0.2
+        # Map Price Per Unit to the new randomly generated keys Items columns
+        try:
+            #Find all the empty cells in Price Per Unit column where the adjacent cells of Item, Quantity and Total Spent are also empty
+            cafe_sales.loc [empty_item_price_quantity_total, 'Price Per Unit'] = list(map(item_price_dict.get, random_items))
+        except Exception as e:
+            logger.exception(f"Attempt to randomly fill Price Per Unit column with the probability approach (second level) failed: {e}")
+            raise
+        else:
+            logger.info(f"Successfully filled Price Per Unit column with the probability approach (second level) in {affected_empty_rows} rows")
+
+        # Let's check that all Price Per Unit column have been filled 
+        if cafe_sales['Price Per Unit'].isna().any():
+            still_missing_price = cafe_sales ['Price Per Unit'].isna().sum()
+            logger.warning(f"There are still {still_missing_price} empty cells in Price Per Unit column after second-level probability approach .")
+
+
+        # 2.0.3 Fill Quantity randomly
+        # value counts returns how many times a unique value appears and (normalize = True) returns the proportions (fractions of the whole)
+        quantity_proportions = CleanCafeSales.original_quantity_distribution
+
+        # We take a count of all rows where Item, Price Per Unit,  Quantity and Total Spent cells are empty 
+        empty_item_price_quantity_total_count = int(empty_item_price_quantity_total.sum()) 
+
+        # create an empty list
+        empty_item_price_quantity_total_method_to_add = [] 
+
+        # I create loop through the dictionary (quantity value & proportion pair)
+        for quant, prop in quantity_proportions.items():
+            empty_item_price_quantity_total_method_to_add.extend([quant] * round(prop * empty_item_price_quantity_total_count)) 
+                                                  # to get a proportion distribution, we round up the multiplication of proportion and the number of empty cells.
+                    # we take the proportion distribution (how many times should a value appear) and then multiply the unique_values based on the proportion distribution.
+                    #So that the unique values are distributed in the list based on the proportion distribution.
+            
+        while len(empty_item_price_quantity_total_method_to_add) < empty_item_price_quantity_total_count:
+            empty_item_price_quantity_total_method_to_add.extend(
+                random.choices(
+                    quantity_proportions.index.tolist(), weights=quantity_proportions.values, 
+                    k=empty_item_price_quantity_total_count - len(empty_item_price_quantity_total_method_to_add)
+                    )
+            )
+
+        # We shuffle the list randomly
+        random.shuffle(empty_item_price_quantity_total_method_to_add)
+
+        try:
+            # We input the shuffled list into every cell in Quantity rows where Item, Price, Quantity and Total Spent columns
+            cafe_sales.loc [empty_item_price_quantity_total, 'Quantity'] = empty_item_price_quantity_total_method_to_add [:empty_item_price_quantity_total_count]
+        except Exception as e:
+            logger.exception(f"Attempt to fill Quantity column based on probability where Item and Price Per Unit columns were not empty failed: {e}.")
+            raise
+        else:
+            logger.info(f"Successfully filled {affected_empty_rows} cells in Quantity column using probability (second-level)") 
+
+
+        # 2.0.4. Fill Total Spent after applying second level probability approach 
+        try:
+            cafe_sales.loc [empty_item_price_quantity_total, 'Total Spent'] = cafe_sales.loc [empty_item_price_quantity_total, 'Quantity'] * cafe_sales.loc [
+                empty_item_price_quantity_total, 'Price Per Unit']
+        except Exception as e:
+            logger.exception(f"Attempt to fill Total Spent after probability approach has been used on Price Per Unit failed: {e}")
+            raise
+        else:
+            logger.info(f"Successfully filled Total Spent column in {affected_empty_rows} cells after Price Per Unit probability approach")
+        
+
+        # Let's check that all the fields in Item, Price Per Unit, Quantity & Total Spent
+        if cafe_sales['Item'].isna().any() or cafe_sales['Price Per Unit'].isna().any() or cafe_sales['Quantity'].isna().any() or cafe_sales['Total Spent'].isna().any():
+            sum_missing_item = cafe_sales['Item'].isna().sum()
+            sum_missing_price = cafe_sales['Price Per Unit'].isna().sum()
+            sum_missing_quantity = cafe_sales['Quantity'].isna().sum()
+            sum_missing_total = cafe_sales['Total Spent'].isna().sum()
+
+            logger.error(f"There are still{sum_missing_item} missing cells in Item column, {sum_missing_price} cells in Price Per Unit column"
+                        f"{sum_missing_quantity} cells in Quantity column and {sum_missing_total} cells in Total Spent column.")
+            raise ValueError
+
+        return cafe_sales
+
+    # here 
+    # check Item
+    @staticmethod
+    # We are not using None because we want the dataframe and column to be required 
+    # This is just a helper function 
+    def probability_approach(dataframe, column):
+        """"
+        General function to fill columns of dataframes randomly.
+        This function would be called in 
+        
+        """
+        dataframe = dataframe.copy()
+
+        # Fill the column
+        column_proportions = dataframe[column].value_counts (normalize = True)
+        empty_column_count = int(dataframe [column].isna().sum())
+
+        column_method_to_add = []
+        for method, prop in column_proportions.items():
+            column_method_to_add.extend([method] * round(prop * empty_column_count))
+
+        while len(column_method_to_add) < empty_column_count:
+            column_method_to_add.extend(
+                random.choices(
+                    column_proportions.index.tolist(), weights=column_proportions.values, 
+                    k=empty_column_count - len(column_method_to_add)
+                    )
+            )
+        
+        random.shuffle(column_method_to_add)
+
+        empty_column = dataframe [column].isna()
+        impacted_rows = empty_column.sum() 
+
+        dataframe.loc [empty_column, column] = column_method_to_add [:empty_column_count]
+
+        if dataframe[column].isna().sum() == 0:
+            logger.info(f"Successfully filled {column} column in {impacted_rows} cells with probability approach")
+
+        return dataframe
+
+
+    @staticmethod
+    def fill_payment_prob_imputation(cafe_sales):
+        """
+        Function that calls the probability_approach function to fill Payment Method column. 
+        """
+        # Fill Payment Method
+        try:
+            cafe_sales = CleanCafeSales.probability_approach(cafe_sales, column = 'Payment Method')
+        except Exception as e:
+            logger.exception(f"Attempt to fill Payment Method column with probability approach failed: {e}")
+            raise
+
+        return cafe_sales
+
+
+    @staticmethod
+    def fill_location_prob_imputation (cafe_sales):
+        """
+        Function that calls the probability_approach function to fill location column. 
+        """
+        try:
+            cafe_sales = CleanCafeSales.probability_approach(dataframe = cafe_sales, column = 'Location')
+        except Exception as e:
+            logger.exception(f"Attempt to fill Location column with probability approach failed: {e}")
+            raise
+
+        return cafe_sales
+
+
+    @staticmethod
+    def fill_date_probabilistic_imputation (cafe_sales):
+        """
+        Function that calls the probability_approach function to fill Transaction Date column.
+        """
+        try:
+            cafe_sales = CleanCafeSales.probability_approach(cafe_sales, column = 'Transaction Date')
+        except Exception as e :
+            logger.exception(f"Attempt to fill Transaction Date column with probability approach failed: {e}")
+            raise
+
+        return cafe_sales
+
+
+    def convert_price_total_decimal(cafe_sales):
+        """
+        """
+        def cents_to_decimal(x):
+            if pd.isna(x):
+                return pd.NA
+            return Decimal (x) / 100
+        
+        try:
+            cafe_sales['Price Per Unit'] = cafe_sales['Price Per Unit'].apply(cents_to_decimal)
+            cafe_sales['Total Spent'] = cafe_sales ['Total Spent'].apply(cents_to_decimal)
+            logger.info("successfully reverted Price Per Unit and Total Spent to decimal.")
+        except Exception as j:
+            logger.error(f"Could not revert Price per Unit and Total Spent to decimal: {j}.") 
+        
+        return cafe_sales 
+
+
+# Feature engineering 
+
+def feature_engineer_date (cafe_sales):
+    """
+    Function to create new (column) features from Transaction Date: 
+    create a day of the week, Is weekend, Month Number, Month of the Year, Quarter of the Year and Year columns based on Transaction Date 
+    """
+    cafe_sales = cafe_sales.copy()
+
+    # 1.0 Date of the week
+
+    cafe_sales['Day of the Week'] = cafe_sales['Transaction Date'].dt.day_name()
+
+    # 2.0 Boolean column is_weekend
+    # We create a column that contains the boolean solution to whether the day of the week is Saturday (5) or Sunday (6)
+        
+    cafe_sales['Is weekend'] = cafe_sales ['Transaction Date'].dt.weekday >= 5 # Thus, equal to or greater than 5
+
+    # 3.0 Month number 
+        
+    cafe_sales ['Month Number'] = cafe_sales ['Transaction Date'].dt.month
+
+    # 4.0 Month of the year 
+    cafe_sales ['Month of the Year'] = cafe_sales ['Transaction Date'].dt.month_name()
+
+    # 5.0 quarter 
+    # Using datetime string formatter to extract the quater of the year and append 'Q' as a prefix 
+    cafe_sales ['Quarter of the Year'] = 'Q' + cafe_sales["Transaction Date"].dt.quarter.astype(str) # My intent is to format it as Q1, Q2, etc 
+
+    # 6.0 Year 
+    cafe_sales ['Year'] = cafe_sales ['Transaction Date'].dt.year
+
+    return cafe_sales
+
+
+
+
+def run_transformation (cafe_sales):
+    """
+    Function that orchestrates the transformation stage  
+    """
+    
+    functions = [CleanCafeSales.convert_error_unknown_to_null,
+    CleanCafeSales.convert_quantity_price_total_date,
+    CleanCafeSales.fill_price_with_quantity_total,
+    CleanCafeSales.fill_price_based_on_item,
+    CleanCafeSales.fill_empty_quantity_total,
+    CleanCafeSales.fill_empty_item,                                                         # unique_item_price (cafe_sales) would be called when this function runs
+    CleanCafeSales.capture_original_quantity_distribution,                                  # function fills CleanCafeSales.original_quantity_distribution 
+    CleanCafeSales.fill_item_price_probabilistic_approach,
+    CleanCafeSales.fill_empty_quantity_total_probabilistic_approach,
+    CleanCafeSales.fill_payment_prob_imputation,                                            # helper function probability_approach() would be called when this function runs
+    CleanCafeSales.fill_location_prob_imputation,
+    CleanCafeSales.fill_date_probabilistic_imputation,
+    CleanCafeSales.convert_price_total_decimal,
+    feature_engineer_date,
+    ]
+
+    for function in functions:
+        cafe_sales = function(cafe_sales)
+
+    return cafe_sales
+
+
+# This is the script guard that controls when the code runs. It ensures that the codes run if we call it directly.
+if __name__ == "__main__":
+    setup_logging()
+    cafe_sales = run_extract_sequence()
+    run_transformation(cafe_sales)
+
+     
+
