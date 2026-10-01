@@ -4,6 +4,7 @@
 import logging                               # for logging
 import random 
 random.seed(5)                               # 5 is a lucky number; I am specifying 5 so that the random shuffle is reproducible 
+from decimal import Decimal                  # Our transformation involves accuracy. Although slow, Decimal is a better choice withworking with fractional values than float64 and it should be compatible with our data warehouse (numeric)
 
 # Importing third-party python packages
 import numpy as np
@@ -20,7 +21,8 @@ logger = logging.getLogger(__name__) # We use __name__ so that it correctly reso
 
 
 class CleanCafeSales:
-    # The class is for orgnisation purposes. So we use decorator @staticmethod
+    # The class is for orgnisation purposes. So we use decorator @staticmethod to show that it is just for organisation. 
+
     # We noticed that some cells are represented as unknown and error
     # We want to replace UNKNOWN and ERROR with nan.
 
@@ -57,48 +59,59 @@ class CleanCafeSales:
         return cafe_sales
 
 
+    # float has float noise that does not capture the exact number we have, 
+    # decimal captures the number but it is slow and .sum() does not work properly so we cannot know what rows which are affected (cafe_sales ['Quantity].isna().sum()) would fail 
+    # pyspark's DecimalType would have been fast and efficent if our dataset were bigger otherwise it is still slow and we also would need to change the codes' whole logic completely in line with pyspark.
+    # pyarrow's decimal type is still not sufficient because it works with vectorization while some of our operations are per row.
+    
+    # We would convert these columns to decimal, multiply by 100 and then convert to integer. Later, we divide by 100 and convert back to decimal. 
+
     @staticmethod
     def convert_quantity_price_total_date(cafe_sales):
         """This function takes in the cafe_sales dataframe as a parameter,
         converts the data type for Quantity to number,
-        the data type for Price Per Unit and Total Spent columns to float, 
+        the data type for Price Per Unit and Total Spent columns to Decimal, 
         and returns the dataframe.
         """
         cafe_sales = cafe_sales.copy()
-        # Convert Quantity column to Integer 
-        try:
-            cafe_sales['Quantity'] = pd.to_numeric(cafe_sales['Quantity'], errors = 'coerce').astype("float64")                     # we added float64 so that pandas knows to convert it to float not integer  
-             
-        except Exception as e:
-            logger.exception(f"Some error occurred during the conversion of Quantity column to float: {e}")
-            raise
-        else:
-            logger.info("Quantity column's datatype successfully converted to float.")
 
-        # We convert Quantity to float so that we can perform operations on it. Such as Total Spent / Price Per unit. I would convert it back to integer at convert_quantity(cafe_sales)   
-        # The above function has a soft error handling safety: pd.to_numeric + errors = 'coerce'. We use both of these methods because our data has null values. 
+        # We create a function that converts columns to Decimaland then multiplies by cent
+        def convert_to_decimal_n_cent (y):
+            if pd.isna(y):
+                return pd.NA
+            return int(Decimal(str(y)) *100)
         
 
-        # Convert Price column to Float 
+        # Convert Quantity column to Integer and then apply function that converts it to cent
         try:
-            cafe_sales['Price Per Unit'] = pd.to_numeric(cafe_sales['Price Per Unit'], errors = 'coerce').astype("float64")
-            # We use pd.to_numeric + errors = 'coerce' because our data has null values
-        except Exception as e: 
-            logger.exception(f"Some error occured during conversion of Price Per Unit to float: {e}")
-            raise
-        else:
-            logger.info("Price Per Unit column's datatype successfully converted to float")
-
-
-        # Convert Total Spent column to Float 
-        try:
-            cafe_sales['Total Spent'] = pd.to_numeric(cafe_sales['Total Spent'], errors= 'coerce').astype("float64")
+            cafe_sales['Quantity'] = pd.to_numeric(cafe_sales['Quantity'], errors = 'coerce').astype("Int64")                  
+             
         except Exception as e:
-            logger.exception(f"Some error occured during the conversion of Total Spent column to float: {e}")
+            logger.exception(f"Some error occurred during the conversion of Quantity column to Integer: {e}")
             raise
         else:
-            logger.info("Total Spent column's datatype successfully converted to float")
+            logger.info("Quantity column's datatype successfully converted to Integer.")
 
+                               
+        # Convert Price column to Decimal (by applying the  convert_to_decimal_n_cent function)
+        try:
+            cafe_sales['Price Per Unit'] = cafe_sales['Price Per Unit'].apply(convert_to_decimal_n_cent)
+            # We use Decimal because we want to do some mathematical calculations. 
+        except Exception as e: 
+            logger.exception(f"Some error occured during conversion of Price Per Unit to Decimal: {e}")
+            raise
+        else:
+            logger.info("Price Per Unit column's datatype successfully converted to Decimal")
+
+
+        # Convert Total Spent column to Decimal (by also applying the  convert_to_decimal_n_cent function)
+        try:
+            cafe_sales['Total Spent'] = cafe_sales['Total Spent'].apply( convert_to_decimal_n_cent)
+        except Exception as e:
+            logger.exception(f"Some error occured during the conversion of Total Spent column to Decimal: {e}")
+            raise
+        else:
+            logger.info("Total Spent column's datatype successfully converted to Decimal")
 
         # Convert Transcation date column to datetime 
         try:
@@ -110,7 +123,6 @@ class CleanCafeSales:
             logger.info("Successfully coverted the datatype for 'Transaction Date' to datetime")
 
         return cafe_sales
-   
 
     @staticmethod
     def fill_price_with_quantity_total (cafe_sales):
@@ -137,7 +149,7 @@ class CleanCafeSales:
         return cafe_sales
 
     @staticmethod
-    def unique_item_price(cafe_sales) -> dict[str, float]:                      # Function returns float  
+    def unique_item_price(cafe_sales) -> dict[str, int]:                      # Function returns string and decimal  # this needs to be fixed
         """
         
         """
@@ -157,30 +169,6 @@ class CleanCafeSales:
         return item_price_dict
 
     
-    # Second dictionary for randomly filling price 
-    def unique_item_whole_price(cafe_sales) -> dict[str, float]:                 # Function returns float  
-        """
-        
-        """
-        cafe_sales = cafe_sales.copy()
-        try:
-            item_price_df = cafe_sales[['Item', 'Price Per Unit']].dropna()     # We take the row columns (Item and Price Per Unit) and drop null values. 
-            whole_price_mask =  (item_price_df ['Price Per Unit'] % 1 == 0)     # We create a mask that has values in price that modulo operation returns 0 (this only happens to whole numbers)
-
-
-            item_price_dict_whole = (
-                        item_price_df [whole_price_mask]                        # Selecting the two columns (Item and Price Per Unit)
-                        .drop_duplicates(subset = ['Item'], keep = 'first')     # I remove duplicates 
-                        .set_index('Item')['Price Per Unit']                    # Set the index to Item which makes the dataframe a series where index is item and column is Price Per Unit
-                        .to_dict()                                              # I convert the series to a dictionary, so that I can map it. 
-                    )
-        except Exception as e:
-            logger.exception(f"{e}")
-            raise 
-
-        return item_price_dict_whole
-
-
     @staticmethod
     def fill_price_based_on_item (cafe_sales):
         """
@@ -423,7 +411,7 @@ class CleanCafeSales:
 
             # 2.1 Fill Item with random 
             try: 
-                item_price_dict = CleanCafeSales.unique_item_whole_price(cafe_sales)
+                item_price_dict = CleanCafeSales.unique_item_price(cafe_sales)
 
                 # We want to know the number of rows where both Item and Price Per Unit are empty.
                 affected_rows = mask_item_price_total_empty.sum()
@@ -474,90 +462,57 @@ class CleanCafeSales:
                 
         # 3.0 Where Item, Price Per Unit and Quantity columns are empty, but Total Spent is filled. 
         if mask_item_price_qt_empty.any():
-            try:
-                # 3.1 Fill Quantity column randomly 
-                sum_item_price_qt_empty = mask_item_price_qt_empty.sum()
+            item_price_dict = CleanCafeSales.unique_item_price(cafe_sales)
 
-                qt_proportions = CleanCafeSales.original_quantity_distribution
+            candidates = (5, 4, 3, 2, 1)
 
-                qt_method_to_add = [] # create an empty list
+            price_to_items = {}
 
-                # I create loop through the dictionary (quantity value & proportion pair)
-                for quant, prop in qt_proportions.items():
-                    qt_method_to_add.extend([quant] * round(prop * sum_item_price_qt_empty)) 
-                                                  # to get a proportion distribution, we round up the multiplication of proportion and the number of empty cells.
-                    # we take the proportion distribution (how many times should a value appear) and then multiply the unique_values based on the proportion distribution.
-                    #So that the unique values are distributed in the list based on the proportion distribution.
+            for item_name, price_cents in item_price_dict.items():
+                price_to_items.setdefault(price_cents, []).append(item_name)
 
-                while len(qt_method_to_add) < sum_item_price_qt_empty:
-                    qt_method_to_add.extend(
-                        random.choices(qt_proportions.index.tolist(), weights =qt_proportions.values, k =sum_item_price_qt_empty - len(qt_method_to_add) )
+            rows_not_resolved = 0
+
+            for row_index in cafe_sales.index [mask_item_price_qt_empty]:
+                total_spent_cents = cafe_sales.at[row_index, 'Total Spent']
+
+                if pd.isna(total_spent_cents) or total_spent_cents <= 0:
+                    rows_not_resolved += 1
+                    continue
+
+                quantity_found = None
+                price_found = None
+                item_found = None
+
+
+                for candidate_quantity in candidates:
+                    divides_evenly = (total_spent_cents % candidate_quantity) == 0
+                    if not divides_evenly:
+                        continue
+
+
+                    candidate_price_cents = total_spent_cents // candidate_quantity
+
+                    if candidate_price_cents in price_to_items:
+                        quantity_found = candidate_quantity
+                        item_found = random.choice(price_to_items[candidate_price_cents])                     # random.choice gives you the item itself while random.choices always gives a list.  
+                        price_found = item_price_dict[item_found]
+                        break
+
+
+                if quantity_found is not None:
+                    cafe_sales.at[row_index, 'Quantity'] = quantity_found
+                    cafe_sales.at[row_index, 'Price Per Unit'] = price_found
+                    cafe_sales.at[row_index, 'Item'] = item_found
+
+                else:
+                    rows_not_resolved += 1
+
+            if rows_not_resolved > 0:
+                logger.warning(
+                    f"{rows_not_resolved} rows: no Quantity between 1 and 5 both divided Total Spent evenly,"
+                    f"and matched a real item's price. Please resolve these rows"
                     )
-            
-                # We shuffle the list randomly
-                random.shuffle(qt_method_to_add)
-
-                # We input the shuffled list into every Quantity column rows where Quantity and Total Spent columns
-                cafe_sales.loc [mask_item_price_qt_empty, 'Quantity'] = qt_method_to_add [:sum_item_price_qt_empty]
-
-                logger.info(f"Successfully filled {sum_item_price_qt_empty} cells in Quantity column using probability where Item and Price Per Unit columns are empty.")
-
-            except Exception as e:
-                logger.exception(f"Error occured while filling Quantity column with probability approach : {e}. ")
-                raise
-
-            
-            # 3.2 Find Price based on Quantity and Total Spent after applying probability approach to Quantity 
-            try:
-                cafe_sales.loc[mask_item_price_qt_empty, 'Price Per Unit'] = cafe_sales.loc[ mask_item_price_qt_empty, 'Total Spent'] / cafe_sales.loc [
-                mask_item_price_qt_empty, 'Quantity']
-                logger.info(f"Successfully filled {sum_item_price_qt_empty} cells in the Price Per Unit column with division of Total Spent and Quantity columns after applying probability approach to Quantity.")
-            except Exception as e:
-                logger.exception(f"Error occured while filling Price Per Unit column with the division of values in Total Spent and Quantity after applying probability approach to Quantity:{e}")
-                raise
-
-            # 3.3 Flip the items and price dictionary and map iTems to price 
-            try:
-                # we use a flipped dictionary 
-                item_price_dict = CleanCafeSales.unique_item_price (cafe_sales)
-                price_item_dict = {v : k for k, v in item_price_dict.items()}
-                
-                cafe_sales.loc [mask_item_price_qt_empty, 'Item'] = (cafe_sales.loc [mask_item_price_qt_empty, 'Price Per Unit'].map(price_item_dict))
-
-                logger.info(f"Successfully filled {sum_item_price_qt_empty} rows in the Item column by apping it with the equivalent value in the Price Per Unit column.") 
-            except Exception as e:
-                logger.exception(f"Attempt to fill Item column with Price Per Unit failed after applying the probabilistic apporach failed: {e}.")
-                raise
-            else:
-                # Let's check that all Items have been 
-                if cafe_sales ['Price Per Unit'].notna().all() & cafe_sales ['Quantity'].notna().all() & cafe_sales['Total Spent'].notna().all():
-                    logger.info("Price Per Unit, Quantity & Total Spent columns are no longer empty")
-                
-
-                if cafe_sales['Item'].isna().any():
-                    mask_items_left = cafe_sales ['Item'].isna() & cafe_sales ['Price Per Unit'].notna() & cafe_sales ['Quantity'].notna() & cafe_sales['Total Spent'].notna()
-                    sum_mask = mask_items_left.sum()
-                    logger.info(f"There are still {sum_mask} rows where Item is empty while Price Per Unit, Quantity and Total Spent are completely filled. Filling now...")
-
-                    logger.info(f"Overridding {sum_mask} rows for consistency...")
-
-                    item_price_dict = CleanCafeSales.unique_item_whole_price(cafe_sales)
-
-                    item_random_list = random.choices(list(item_price_dict.keys()), k = int(sum_mask))
-
-                    try: 
-                        cafe_sales.loc [mask_items_left, 'Item'] = item_random_list
-                        cafe_sales.loc [mask_items_left, 'Price Per Unit'] = list(map(item_price_dict.get, item_random_list))
-                        cafe_sales.loc [mask_items_left, 'Quantity'] = cafe_sales.loc [mask_items_left, 'Total Spent'] / cafe_sales.loc [mask_items_left, 'Price Per Unit']
-                        logger.info(f"filled {sum_mask} rows by finding item, and using item to find price and then finding Quantity with the Total Spent/ Price Per Unit - Third probabilistic approach")
-                    except Exception as e:
-                        logger.exception(f"Filling item - third probabilistic approach failed: {e}")
-                        raise
-                    else: 
-                        if cafe_sales['Item'].isna().any():
-                            still_missing_rows_item = cafe_sales['Item'].isna().sum()
-                            logger.error(f"fill_item_price_probability_approach function still leaves {still_missing_rows_item} cells empty in Item column.")
-                            raise ValueError
             
         return cafe_sales
 
@@ -571,10 +526,10 @@ class CleanCafeSales:
 
         cafe_sales = cafe_sales.copy()
 
-        item_price_dict = CleanCafeSales.unique_item_whole_price(cafe_sales)
+        item_price_dict = CleanCafeSales.unique_item_price(cafe_sales)
 
         if cafe_sales ['Item'].notna().all() & cafe_sales ['Price Per Unit'].notna().all() & cafe_sales['Quantity'].notna().all() & cafe_sales['Total Spent'].notna().all():
-            logger.info("Item, Price Per Unit, Quantity and Total Spent are completely filled. Skipping this step...")
+            logger.warning("Item, Price Per Unit, Quantity and Total Spent are completely filled. Skipping this step...")
             return cafe_sales
         
         # masks : rows where Item, Price Per Unit, Quantity and Total Spent columns are all empty 
@@ -768,20 +723,22 @@ class CleanCafeSales:
         return cafe_sales
 
 
-    def convert_quantity(cafe_sales):
-        if cafe_sales ['Quantity'].isna().any():
-            quantity_still_missing = cafe_sales ['Quantity'].isna().sum()
-            logger.error(f"Quantity column still has empty values: {quantity_still_missing}. Unable to proceed...")
-            raise ValueError
-
+    def convert_price_total_decimal(cafe_sales):
+        """
+        """
+        def cents_to_decimal(x):
+            if pd.isna(x):
+                return pd.NA
+            return Decimal (x) / 100
+        
         try:
-            cafe_sales ['Quantity'] = pd.to_numeric (cafe_sales ['Quantity'], errors = 'coerce').astype('Int64')                                        # 'Int64' is for pandas 
-            logger.info("All records have been filled. We have also successfully converted the data type of quantity column to integer.")
-        except Exception as e:
-            logger.exception(f"Unable to convert the datatype of Quantity column to integer...")
-            raise 
-
-        return cafe_sales
+            cafe_sales['Price Per Unit'] = cafe_sales['Price Per Unit'].apply(cents_to_decimal)
+            cafe_sales['Total Spent'] = cafe_sales ['Total Spent'].apply(cents_to_decimal)
+            logger.info("successfully reverted Price Per Unit and Total Spent to decimal.")
+        except Exception as j:
+            logger.error(f"Could not revert Price per Unit and Total Spent to decimal: {j}.") 
+        
+        return cafe_sales 
 
 
 # Feature engineering 
@@ -838,7 +795,7 @@ def run_transformation (cafe_sales):
     CleanCafeSales.fill_payment_prob_imputation,                                            # helper function probability_approach() would be called when this function runs
     CleanCafeSales.fill_location_prob_imputation,
     CleanCafeSales.fill_date_probabilistic_imputation,
-    CleanCafeSales.convert_quantity,
+    CleanCafeSales.convert_price_total_decimal,
     feature_engineer_date,
     ]
 
