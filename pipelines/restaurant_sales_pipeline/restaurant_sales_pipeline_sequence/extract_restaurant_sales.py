@@ -23,7 +23,7 @@ def download_kaggle_dataset(retries = config.MAX_RETRIES):
 
     # 1.1 Check if we have the file already in our local directory 
     restaurant_sales_file_path = os.path.join (config.SALES_DATA_DOWNLOAD_PATH, config.RESTAURANT_SALES_DATASET)
-    if os.path.exists (restaurant_sales_path):
+    if os.path.exists (restaurant_sales_file_path):
         logger.info(f"Restaurant Sales Dataset already exists at '{restaurant_sales_file_path}'. Skipping....")
         return True                                                                                               # The function would signal success and end here if the above confitions are met. 
     
@@ -70,8 +70,8 @@ def download_kaggle_dataset(retries = config.MAX_RETRIES):
 
             logger.info("kaggle is available in the import library. Kaggle is succesfully imported.")
         except Exception as e:
-            raise logger.exception(f"Kaggle is available in the import library. But there is an import error. 
-            As the first step in trouble shooting, please check the folder stipulated in Vscode workspace.")
+            raise logger.exception(f"Kaggle is available in the import library. But there is an import error." 
+            "As the first step in trouble shooting, please check the folder stipulated in Vscode workspace.")
 
     # 1.5 We download with retries 
     os.makedirs(config.SALES_DATA_DOWNLOAD_PATH, exist_ok = True)
@@ -88,7 +88,7 @@ def download_kaggle_dataset(retries = config.MAX_RETRIES):
             kaggle.api.dataset_download_files(config.RESTAURANT_DATASET_KAGGLE, path = config.SALES_DATA_DOWNLOAD_PATH, unzip = True)
 
         except Exception as e:
-            logger.exception (f"Attempt {attempt} failed : {type{e}.__name__} : {e}")
+            logger.exception (f"Attempt {attempt} failed : {type(e).__name__} : {e}")
 
         # diagnostic for failed downloads and the commencement of another attempt. 
         if not os.path.exists(restaurant_sales_file_path):
@@ -116,7 +116,7 @@ def extract():
     logger.info("Starting extraction...")
     logger.info(f"Reading dataset  from {restaurant_sales_file_path}...")
 
-    restaurant_sales = pd.read_csv(cafe_sales_file_path)
+    restaurant_sales = pd.read_csv(restaurant_sales_file_path)
     logger.info(f"Dataset extracted successfully...")
 
     return restaurant_sales                                                                                 # The dataframe would become the parameter for our transformations . 
