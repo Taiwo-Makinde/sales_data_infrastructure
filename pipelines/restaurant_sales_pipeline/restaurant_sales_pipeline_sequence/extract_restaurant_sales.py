@@ -55,13 +55,15 @@ def download_kaggle_dataset(retries = config.MAX_RETRIES):
                 subprocess.check_call([sys.executable, "-m", "pip", "install", "kaggle", "-q", "--no-deps"])
                 logger.info("Successfully installed Kaggle without dependies.")
             except subprocess.CalledProcessError as g:
-                raise logger.exception (f"Failed to install Kagg;e without dependencies: {g}")
+                logger.exception (f"Failed to install Kagg;e without dependencies: {g}")
+                raise
 
         try:
             import kaggle 
             logger.info("Kaggle is succesfully imported after installation.")
         except Exception as e:
-            raise logger.exception (f"Failed to import kaggle after succesfully installing Kaggle: {e}.")
+            logger.exception (f"Failed to import kaggle after succesfully installing Kaggle: {e}.")
+            raise
 
     # 1.4.2 Kaggle can be found in the import library 
     else:
@@ -70,8 +72,9 @@ def download_kaggle_dataset(retries = config.MAX_RETRIES):
 
             logger.info("kaggle is available in the import library. Kaggle is succesfully imported.")
         except Exception as e:
-            raise logger.exception(f"Kaggle is available in the import library. But there is an import error." 
+            logger.exception(f"Kaggle is available in the import library. But there is an import error." 
             "As the first step in trouble shooting, please check the folder stipulated in Vscode workspace.")
+            raise
 
     # 1.5 We download with retries 
     os.makedirs(config.SALES_DATA_DOWNLOAD_PATH, exist_ok = True)
@@ -101,7 +104,8 @@ def download_kaggle_dataset(retries = config.MAX_RETRIES):
 
     # When all the attempts have been completed. We check if the file now exists. 
     if not os.path.exists(restaurant_sales_file_path):
-        raise logger.error(f"All attempt to download {config.RESTAURANT_DATASET_KAGGLE} failed.")
+        logger.error(f"All attempt to download {config.RESTAURANT_DATASET_KAGGLE} failed.")
+        raise 
 
     return True 
 
