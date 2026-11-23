@@ -229,6 +229,7 @@ class CleanRestaurantSales:
         """
         restaurant_sales = restaurant_sales.copy
 
+        # 1.0 Find Item
         # 1.1 For unique values - e only use category 
         try:
             lookup_dict = {v ['Category'] : k for k, v in ReturnValues.item_price_category_unique_dict().items()}
@@ -293,6 +294,7 @@ class CleanRestaurantSales:
 
             mask_empty_quantity = restaurant_sales ['Price'].notna() & restaurant_sales ['Quantity'].isna() & restaurant_sales ['Order Total'].isna()
 
+            # This is a simpler method but I think the complex method attends to certain things - should look inot this again.
             restaurant_sales.loc [mask_empty_quantity, 'Quantity'] = random.choices (
                 value_with_distribution.index.tolist(),                                                             # This is the population (that is the all list of things to be picked from)
                 weights = value_with_distribution.values,                                                           # Weights refer to the matching probability of being picked (how likely is a thing to be picked)
@@ -317,6 +319,16 @@ class CleanRestaurantSales:
             logger.exception(f"Failed to fill Order Total column by the multipication of Price and Quantity after applying porbabilitistic approach to them.: {e}")
             raise
 
+        if not restaurant_sales ['Item'].notna() & restaurant_sales ['Price'].notna() & restaurant_sales ['Quantity'].notna() & restaurant_sales ['Order Total'].notna():
+            all_missing_item = restaurant_sales ['Item'].isna().sum() 
+            all_missing_price = restaurant_sales ['Price'].isna().sum()
+            all_missing_quantity = restaurant_sales ['Quantity'].isna().sum()
+            all_missing_total = restaurant_sales ['Order Total'].isna().sum()
+
+            logger.error(f"Item, Price, Quantity and Order Total columns are not completely filled." \
+            f"There are still empty {all_missing_item} cells in Item column, {all_missing_price} cells in Price column, {all_missing_quantity}"
+            f"{all_missing_total} cells in Order Total column.")
+            raise ValueError
 
         return restaurant_sales
 
