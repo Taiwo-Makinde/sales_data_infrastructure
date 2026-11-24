@@ -125,6 +125,22 @@ class CleanRestaurantSales:
             raise
 
         return restaurant_sales
+    
+    @staticmethod
+    def convert_date (restaurant_sales):
+
+        """
+        """
+        restaurant_sales = restaurant_sales.copy 
+
+        try:
+            restaurant_sales ['Order Date'] = pd.to_datetime(restaurant_sales ['Order Date'], errors = 'coerce')
+            logger.info("Successfully converted Order Date from string to datetime.")
+        except Exception as e:
+            logger.exception (f"Failed to convert Order Total from string to datetime: {e}")
+            raise 
+
+        return restaurant_sales 
 
     @staticmethod
     def fill_price_quantity_order_total (restaurant_sales):
@@ -319,7 +335,7 @@ class CleanRestaurantSales:
             logger.exception(f"Failed to fill Order Total column by the multipication of Price and Quantity after applying porbabilitistic approach to them.: {e}")
             raise
 
-        if not restaurant_sales ['Item'].notna() & restaurant_sales ['Price'].notna() & restaurant_sales ['Quantity'].notna() & restaurant_sales ['Order Total'].notna():
+        if restaurant_sales ['Item'].isna().any() & restaurant_sales ['Price'].isna().any() & restaurant_sales ['Quantity'].isna().any() & restaurant_sales ['Order Total'].isna().any():
             all_missing_item = restaurant_sales ['Item'].isna().sum() 
             all_missing_price = restaurant_sales ['Price'].isna().sum()
             all_missing_quantity = restaurant_sales ['Quantity'].isna().sum()
@@ -331,6 +347,107 @@ class CleanRestaurantSales:
             raise ValueError
 
         return restaurant_sales
+
+
+    @staticmethod
+    def fill_payment_method(restaurant_sales):
+        """
+        """
+        restaurant_sales = restaurant_sales.copy 
+
+        try:
+            payment_method_distribution = restaurant_sales ['Payment Method'].value_counts(normalize = True)
+
+            empty_payment_method_cells = restaurant_sales["Payment Method"].isna()
+
+            restaurant_sales.loc [empty_payment_method_cells, 'Payment Method'] = random.choices (
+                payment_method_distribution.index.to_list(),
+                weights = payment_method_distribution.values,
+                k = int(empty_payment_method_cells.sum())
+            )
+
+            logger.info(f"Suceesfully filled {empty_payment_method_cells.sum()} cells in Payment Method based on probability.")
+
+        except Exception as e:
+            logger.exception(f"Failed to fill Payment Method column with probability: {e}")
+            raise 
+
+        if restaurant_sales ['Payment Method'].isna().any():
+            sum_empty_cells = restaurant_sales ['Payment Method'].isna().sum()
+            logger.error (f"There are still empty {sum_empty_cells} cells in Payment Method")
+
+        return restaurant_sales
+
+@staticmethod
+def feature_engineering (restaurant_sales):
+    """
+    """
+
+    restaurant_sales = restaurant_sales.copy 
+
+    try:
+        # 1. 0
+        restaurant_sales ['Day of the Week'] = restaurant_sales ['Order Date'].dt.day_name()
+
+        # 2.0 Weekend boolean
+        restaurant_sales ['Is Weekend'] = restaurant_sales ['Order Date'].dt.weekday >= 5
+
+        # 3.0 Month number 
+        restaurant_sales ['Month Number'] = restaurant_sales ['Order Date'].dt.month 
+
+        # 4.0 Month of the Year 
+        restaurant_sales ['Month of the Year'] = restaurant_sales ['Order Date'].dt.month_name()
+
+        # 5.0 Quarter
+        restaurant_sales ['Quarter of the Year'] = Q + restaurant_sales ['order Date'].dt.quarter.astype(str)
+
+        # 6.0 Year 
+        restaurant_sales ['Year'] = restaurant_sales ['Order Date'].dt.year
+
+        logger.info("Successfully builf features from Order Total.")
+
+    except Exception as e:
+        logger.exception(f"Falied to build further features from Order Total: {e}")
+        raise 
+
+
+    return restaurant_sales 
+
+
+def run_transformation (restaurant_sales):
+    """
+    """
+
+    functions = [CleanRestaurantSales.convert_quantity_price_total,
+                 CleanRestaurantSales.convert_date,
+                 CleanRestaurantSales.fill_price_quantity_order_total,
+                 CleanRestaurantSales.fill_item_with_price_category,
+                 CleanRestaurantSales.fill_item_with_prob_price_category,
+                 CleanRestaurantSales.fill_item_price_qty_total,
+                 CleanRestaurantSales.fill_payment_method,
+                 feature_engineering
+                 ]
+
+    for function in functions:
+        restaurant_sales = function(restaurant_sales)
+
+    return restaurant_sales 
+
+
+
+# Script Guard 
+if __name__ == "__main__":
+    setup_logging()
+    restaurant_sales = run_extract_sequence()
+    run_transformation(restaurant_sales)
+
+
+
+
+
+    
+
+
 
 
         
