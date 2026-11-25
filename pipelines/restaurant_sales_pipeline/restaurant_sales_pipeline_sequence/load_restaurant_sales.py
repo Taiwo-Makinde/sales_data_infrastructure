@@ -32,3 +32,17 @@ class PrepareRestaurantSales:
             .drop_duplicates()
             .rename(columns = column_maps)
         )
+
+def prepare_items(restaurant_sales: pd.DataFrame) -> pd.DataFrame:
+    """
+    """
+    try:
+        item_df = PrepareRestaurantSales.prepare_columns(restaurant_sales, column_maps = {"Item": "item_name"})
+        logger.info("Successfully built Restaurant Sales data to be loaded into item dimension table.")
+    except Exception as e:
+        logger.exception (f"Failed to build restaurant_sales data to bew loaded into item dimension table: {e}")
+        raise 
+
+    return item_df 
+
+
