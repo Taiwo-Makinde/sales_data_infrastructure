@@ -90,6 +90,16 @@ class ReturnValues:
             'Side Salad' : { 'Price' : 300 , 'Category' : 'Side Dishes'}
              }
 
+    def diet_dict ():
+        return { 
+            'Vegetarian' : ('French Fries', 'Sweet Potato Fries', 'Pasta Alfredo', 'Vegetarian Platter', 'Chocolate Cake','Fruit Salad', 'Brownie',
+                             'Coca Cola', 'Orange Juice', 'Lemonade', 'Iced Tea', 'Water', 'Mashed Potatoes', '	Grilled Vegetables', 'Side Salad', 
+                             'Garlic Bread', 'Garlic Bread'
+                            ),
+             'Non-vegetarian' : ('Chicken Melt', 'Cheese Fries', 'Beef Chili', 'Nachos Grande', 
+                                 'Grilled Chicken', 'Steak', 'Salmon', 'Ice Cream', 'Cheesecake')
+            }
+
 
 class CleanRestaurantSales:
     @staticmethod
@@ -378,40 +388,67 @@ class CleanRestaurantSales:
 
         return restaurant_sales
 
-@staticmethod
-def feature_engineering (restaurant_sales):
-    """
-    """
+class FeatureEngineerRestaurantSales:
 
-    restaurant_sales = restaurant_sales.copy 
+    @staticmethod
+    def date_feature (restaurant_sales):
+        """
+        """
 
-    try:
-        # 1. 0
-        restaurant_sales ['Day of the Week'] = restaurant_sales ['Order Date'].dt.day_name()
+        restaurant_sales = restaurant_sales.copy 
 
-        # 2.0 Weekend boolean
-        restaurant_sales ['Is Weekend'] = restaurant_sales ['Order Date'].dt.weekday >= 5
+        try:
+            # 1. 0
+            restaurant_sales ['Day of the Week'] = restaurant_sales ['Order Date'].dt.day_name()
 
-        # 3.0 Month number 
-        restaurant_sales ['Month Number'] = restaurant_sales ['Order Date'].dt.month 
+            # 2.0 Weekend boolean
+            restaurant_sales ['Is Weekend'] = restaurant_sales ['Order Date'].dt.weekday >= 5
 
-        # 4.0 Month of the Year 
-        restaurant_sales ['Month of the Year'] = restaurant_sales ['Order Date'].dt.month_name()
+            # 3.0 Month number 
+            restaurant_sales ['Month Number'] = restaurant_sales ['Order Date'].dt.month 
 
-        # 5.0 Quarter
-        restaurant_sales ['Quarter of the Year'] = Q + restaurant_sales ['order Date'].dt.quarter.astype(str)
+            # 4.0 Month of the Year 
+            restaurant_sales ['Month of the Year'] = restaurant_sales ['Order Date'].dt.month_name()
 
-        # 6.0 Year 
-        restaurant_sales ['Year'] = restaurant_sales ['Order Date'].dt.year
+            # 5.0 Quarter
+            restaurant_sales ['Quarter of the Year'] = Q + restaurant_sales ['order Date'].dt.quarter.astype(str)
 
-        logger.info("Successfully builf features from Order Total.")
+            # 6.0 Year 
+            restaurant_sales ['Year'] = restaurant_sales ['Order Date'].dt.year
 
-    except Exception as e:
-        logger.exception(f"Falied to build further features from Order Total: {e}")
-        raise 
+            logger.info("Successfully builf features from Order Total.")
+
+        except Exception as e:
+            logger.exception(f"Falied to build further features from Order Total: {e}")
+            raise 
 
 
-    return restaurant_sales 
+        return restaurant_sales 
+
+    @staticmethod
+    def diet_feature(restaurant_sales):
+        """
+        """
+
+        restaurant_sales = restaurant_sales.copy 
+
+        try:
+            reverse_mapping = {}
+
+            for key, values in ReturnValues.diet_dict().item():
+                for value in values:
+                    reverse_mapping [value] = key
+
+            restaurant_sales ['Diet'] = restaurant_sales ['Item'].map(reverse_mapping)
+
+            logger.info("Successfully created a Diet column and filled it by mapping values in Item to it")
+
+        except Exception as g:
+            logger.info(f"Failed to create Diet column and to fill it by mapping it with the dictionary values that correlate with Item column : {g}")
+            raise 
+        
+        return restaurant_sales
+
 
 
 def run_transformation (restaurant_sales):
@@ -425,7 +462,8 @@ def run_transformation (restaurant_sales):
                  CleanRestaurantSales.fill_item_with_prob_price_category,
                  CleanRestaurantSales.fill_item_price_qty_total,
                  CleanRestaurantSales.fill_payment_method,
-                 feature_engineering
+                 FeatureEngineerRestaurantSales.date_feature,
+                 FeatureEngineerRestaurantSales.diet_feature
                  ]
 
     for function in functions:
