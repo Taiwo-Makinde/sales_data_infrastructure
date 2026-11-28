@@ -411,7 +411,7 @@ class FeatureEngineerRestaurantSales:
             restaurant_sales ['Month of the Year'] = restaurant_sales ['Order Date'].dt.month_name()
 
             # 5.0 Quarter
-            restaurant_sales ['Quarter of the Year'] = Q + restaurant_sales ['order Date'].dt.quarter.astype(str)
+            restaurant_sales ['Quarter of the Year'] = "Q" + restaurant_sales ['order Date'].dt.quarter.astype(str)
 
             # 6.0 Year 
             restaurant_sales ['Year'] = restaurant_sales ['Order Date'].dt.year
@@ -446,7 +446,7 @@ class FeatureEngineerRestaurantSales:
         except Exception as g:
             logger.info(f"Failed to create Diet column and to fill it by mapping it with the dictionary values that correlate with Item column : {g}")
             raise 
-        
+
         return restaurant_sales
 
 

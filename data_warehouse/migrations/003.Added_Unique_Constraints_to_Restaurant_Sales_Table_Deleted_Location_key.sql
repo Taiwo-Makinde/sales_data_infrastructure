@@ -1,0 +1,6 @@
+-- ADDING CONSTRAINTS TO RESTAURANT_SALES FACT TABLE 
+ALTER TABLE facts.restaurant_sales ADD CONSTRAINT order_id_unique_constraint UNIQUE (order_id);
+
+
+-- DELETING LOCATION FROM RESTAURANT_SALES FACT TABLE 
+ALTER TABLE facts.restaurant_sales DROP COLUMN IF EXISTS location_key;
