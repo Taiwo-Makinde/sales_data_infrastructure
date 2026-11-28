@@ -122,7 +122,7 @@ def insert_table (dataframe, database_engine, table, schema, conflict_columns):
         # Step 2 - Build the SQL schema 
         cols = ", ".join (dataframe.columns)
         vals = ", ".join ([f": {c}" for c in dataframe.columns])
-        conflicts = ", ".join(confict_columns) if not isinstance (coflict_columns, str) else conflict_columns
+        conflicts = ", ".join(conflict_columns) if not isinstance (conflict_columns, str) else conflict_columns
 
         sql = text (f"""
             INSERT INTO {schema}.{table} ({cols})
